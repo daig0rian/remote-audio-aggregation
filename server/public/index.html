@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAA Server</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', sans-serif; background: #12121f; color: #e0e0e0; padding: 1.5em 2em; }
+
+h1 { font-size: 1.3em; font-weight: 600; color: #fff; margin-bottom: 0.25em; }
+.subtitle { font-size: 0.8em; color: #666; margin-bottom: 1.2em; }
+
+/* Player */
+.player-section {
+  display: flex; align-items: center; gap: 1em; flex-wrap: wrap;
+  padding-bottom: 1.2em; border-bottom: 1px solid #2a2a3a;
+  margin-bottom: 1.2em;
+}
+.play-btn {
+  padding: 0.45em 1.2em; font-size: 0.9em;
+  background: #1c1c30; border: 1px solid #4caf50;
+  color: #4caf50; border-radius: 5px; cursor: pointer; white-space: nowrap;
+}
+.play-btn:hover { background: #4caf50; color: #000; }
+.play-btn.playing { border-color: #e74c3c; color: #e74c3c; }
+.play-btn.playing:hover { background: #e74c3c; color: #fff; }
+#ws-status { font-size: 0.8em; color: #666; }
+#meter { width: 200px; height: 6px; background: #2a2a3a; border-radius: 3px; overflow: hidden; }
+#bar   { height: 100%; width: 0; background: #4caf50; transition: width 80ms; }
+
+/* Shared parts */
+.dot {
+  width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: #444;
+}
+.dot.active { background: #4caf50; box-shadow: 0 0 5px #4caf5088; }
+.dot.silent { background: #f0a500; box-shadow: 0 0 4px #f0a50066; }
+
+.name-input {
+  background: none; border: none; border-bottom: 1px solid transparent;
+  color: #e0e0e0; font-size: 1em; font-weight: 600;
+  padding: 1px 3px; cursor: pointer; min-width: 0; width: 100%;
+}
+.name-input::placeholder { color: #555; font-weight: 400; }
+.name-input:hover { border-bottom-color: #3a3a5a; }
+.name-input:focus { border-bottom-color: #4caf50; outline: none; background: #12122a; }
+
+.ssrc-tag {
+  font-family: monospace; font-size: 0.72em; color: #555;
+  background: #1a1a2e; padding: 1px 5px; border-radius: 3px; white-space: nowrap;
+}
+
+.delete-btn {
+  background: none; border: none; color: #444; cursor: pointer;
+  font-size: 1em; line-height: 1; padding: 2px 5px; border-radius: 3px;
+}
+.delete-btn:hover { color: #c0392b; background: #2a1a1a; }
+
+.mute-btn {
+  padding: 0.2em 0.6em; font-size: 0.8em;
+  border: 1px solid #3a3a5a; border-radius: 4px;
+  background: #1a1a2e; color: #aaa; cursor: pointer; white-space: nowrap;
+}
+.mute-btn:hover { border-color: #666; color: #ddd; }
+.mute-btn.muted { background: #4a1a1a; border-color: #c0392b; color: #e74c3c; }
+
+.vol-pct { font-size: 0.8em; color: #888; min-width: 34px; text-align: right; flex-shrink: 0; }
+.vol-slider { flex: 1; height: 4px; accent-color: #4caf50; cursor: pointer; min-width: 40px; }
+
+/* Empty */
+.empty { color: #555; font-style: italic; font-size: 0.9em; }
+
+/* ---- Client list: row layout ---- */
+.client-list { display: flex; flex-direction: column; gap: 0.4em; }
+
+.client-row {
+  display: grid;
+  /* dot | ssrc | name | mute | vol(pct+slider) | status | del */
+  grid-template-columns: 9px 72px 1fr auto minmax(120px, 200px) 120px auto;
+  grid-template-areas: "dot ssrc name mute vol status del";
+  align-items: center;
+  column-gap: 0.7em;
+  padding: 0.55em 1em;
+  background: #1c1c30;
+  border: 1px solid #2a2a44;
+  border-radius: 8px;
+}
+.client-row.active-row { border-color: #2d6a3f; }
+.client-row.silent-row { border-color: #5a4500; }
+
+.client-row .row-dot    { grid-area: dot; }
+.client-row .row-ssrc   { grid-area: ssrc; }
+.client-row .row-name   { grid-area: name; }
+.client-row .row-mute   { grid-area: mute; }
+.client-row .row-vol    { grid-area: vol; display: flex; align-items: center; gap: 0.4em; min-width: 0; }
+.client-row .row-status { grid-area: status; font-size: 0.75em; color: #777; white-space: nowrap; overflow: hidden; }
+.client-row .row-del    { grid-area: del; }
+
+/* Narrow: card-like (2 columns) */
+@media (max-width: 540px) {
+  .client-row {
+    grid-template-columns: 9px 72px 1fr auto;
+    grid-template-areas:
+      "dot  ssrc  name   del"
+      ".    vol   vol    mute"
+      ".    status status status";
+    row-gap: 0.5em;
+    padding: 0.75em 1em;
+  }
+  .client-row .row-status { white-space: normal; }
+}
+</style>
+</head>
+<body>
+
+<h1>RAA Server</h1>
+<p class="subtitle">クライアント管理 — 2秒ごとに自動更新</p>
+
+<div class="player-section">
+  <button class="play-btn" id="play-btn">▶ 混合音声を再生</button>
+  <div id="ws-status">停止中</div>
+  <div id="meter"><div id="bar"></div></div>
+</div>
+
+<div class="client-list" id="client-list">
+  <p class="empty">読み込み中...</p>
+</div>
+
+<script src="/opus-decoder.bundle.js" charset="UTF-8"></script>
+<script>
+// ---- API helpers ----
+async function api(method, url, body) {
+  const opts = { method };
+  if (body !== undefined) {
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(`${method} ${url} -> ${r.status} ${r.statusText}`);
+  return r.json();
+}
+
+// ---- Client state cache (uuid -> object) ----
+let cache = {};
+
+// ---- Age formatting ----
+function fmtAge(ts, serverNow) {
+  if (!ts) return '未受信';
+  const s = Math.floor((serverNow - new Date(ts)) / 1000);
+  if (s <    2) return '受信中';
+  if (s <   60) return `${s}秒前`;
+  if (s < 3600) return `${Math.floor(s / 60)}分前`;
+  if (s < 86400) return `${Math.floor(s / 3600)}時間前`;
+  return `${Math.floor(s / 86400)}日前`;
+}
+
+function esc(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ---- Render ----
+function clientState(c, serverNow) {
+  const audioAge  = c.last_audio ? (serverNow - new Date(c.last_audio)) / 1000 : Infinity;
+  const packetAge = c.last_seen  ? (serverNow - new Date(c.last_seen))  / 1000 : Infinity;
+  if (audioAge  < 2) return 'active';
+  if (packetAge < 3) return 'silent';
+  return 'offline';
+}
+
+function render(clients, serverNow) {
+  const list = document.getElementById('client-list');
+
+  if (clients.length === 0) {
+    list.innerHTML = '<p class="empty">クライアント未接続</p>';
+    return;
+  }
+
+  const focusedEl   = document.activeElement;
+  const focusedUuid = focusedEl?.classList?.contains('name-input') ? focusedEl.dataset?.uuid : null;
+  const focusedVal  = focusedUuid ? focusedEl.value : null;
+
+  list.innerHTML = clients.map(c => {
+    const state   = clientState(c, serverNow);
+    const volPct  = Math.round(c.volume * 100);
+    const rowCls  = state === 'active' ? 'active-row' : state === 'silent' ? 'silent-row' : '';
+    const dotCls  = state === 'active' ? 'active'     : state === 'silent' ? 'silent'     : '';
+    const statusTxt = state === 'active'  ? '🟢 受信中'
+                    : state === 'silent'  ? '🟡 無音（接続中）'
+                    :                       '⚫ 未接続 ' + fmtAge(c.last_seen, serverNow);
+    return `
+    <div class="client-row ${rowCls}" data-uuid="${c.uuid}">
+      <div class="row-dot dot ${dotCls}"></div>
+      <input class="row-name name-input" type="text"
+             data-uuid="${c.uuid}"
+             value="${esc(c.friendly_name)}"
+             placeholder="(名前未設定)"
+             title="クリックして名前を編集">
+      <span class="row-ssrc ssrc-tag">${c.uuid}</span>
+      <button class="row-mute mute-btn ${c.muted ? 'muted' : ''}" data-uuid="${c.uuid}">
+        ${c.muted ? '🔇' : '🔊'}
+      </button>
+      <div class="row-vol">
+        <span class="vol-pct">${volPct}%</span>
+        <input class="vol-slider" type="range" min="0" max="2" step="0.01"
+               value="${c.volume}" data-uuid="${c.uuid}">
+      </div>
+      <span class="row-status">${statusTxt}</span>
+      <button class="row-del delete-btn" data-uuid="${c.uuid}" title="削除">✕</button>
+    </div>`;
+  }).join('');
+
+  if (focusedUuid) {
+    const el = list.querySelector(`.name-input[data-uuid="${focusedUuid}"]`);
+    if (el) { el.focus(); el.value = focusedVal; }
+  }
+}
+
+// ---- Poll ----
+let sliderDragging = false;
+
+async function poll() {
+  try {
+    const resp      = await api('GET', '/api/clients');
+    const clients   = resp.clients;
+    const serverNow = new Date(resp.server_time).getTime();
+    cache = Object.fromEntries(clients.map(c => [c.uuid, c]));
+    const nameFocused = document.activeElement?.classList?.contains('name-input');
+    if (!sliderDragging && !nameFocused) render(clients, serverNow);
+  } catch (e) {
+    console.error('poll:', e);
+  }
+}
+
+poll();
+setInterval(poll, 2000);
+
+// ---- Event delegation ----
+const list = document.getElementById('client-list');
+
+// Slider drag guard
+list.addEventListener('pointerdown', e => {
+  if (e.target.classList.contains('vol-slider')) sliderDragging = true;
+});
+document.addEventListener('pointerup', () => { sliderDragging = false; });
+
+// Volume slider: live label, PATCH on release
+list.addEventListener('input', e => {
+  if (!e.target.classList.contains('vol-slider')) return;
+  const pct = Math.round(parseFloat(e.target.value) * 100);
+  e.target.closest('.row-vol').querySelector('.vol-pct').textContent = pct + '%';
+});
+
+list.addEventListener('change', async e => {
+  const uuid = e.target.dataset.uuid;
+  if (!uuid || !e.target.classList.contains('vol-slider')) return;
+  await api('PATCH', `/api/clients/${uuid}`, { volume: parseFloat(e.target.value) }).catch(console.error);
+});
+
+// Mute & Delete
+list.addEventListener('click', async e => {
+  const uuid = e.target.dataset.uuid;
+  if (!uuid) return;
+
+  if (e.target.classList.contains('mute-btn')) {
+    const c = cache[uuid];
+    if (!c) return;
+    await api('PATCH', `/api/clients/${uuid}`, { muted: !c.muted }).catch(console.error);
+    poll();
+  }
+
+  if (e.target.classList.contains('delete-btn')) {
+    if (!confirm(`クライアント ${uuid} を削除しますか？`)) return;
+    await api('DELETE', `/api/clients/${uuid}`).catch(console.error);
+    poll();
+  }
+});
+
+// Name field: PATCH on blur
+list.addEventListener('blur', async e => {
+  if (!e.target.classList.contains('name-input')) return;
+  const uuid = e.target.dataset.uuid;
+  if (!uuid) return;
+  await api('PATCH', `/api/clients/${uuid}`, { friendly_name: e.target.value }).catch(console.error);
+}, true);
+
+// ---- WebSocket player with Opus decoding (opus-decoder WASM) ----
+const playBtn  = document.getElementById('play-btn');
+const wsStatus = document.getElementById('ws-status');
+const bar      = document.getElementById('bar');
+let ws = null, playing = false;
+let audioCtx = null, opusDecoder = null, nextPlay = 0;
+
+const BUFFER_MS = 200;  // jitter buffer size
+
+function resetPlayerUI() {
+  playing = false;
+  playBtn.textContent = '▶ 混合音声を再生';
+  playBtn.classList.remove('playing');
+  wsStatus.textContent = '停止中';
+  bar.style.width = '0';
+}
+
+function onFrame(ev) {
+  if (!(ev.data instanceof ArrayBuffer)) return;
+  const frame = new Uint8Array(ev.data);
+  bar.style.width = Math.min(100, frame.byteLength / 2) + '%';
+
+  let decoded;
+  try { decoded = opusDecoder.decodeFrame(frame); } catch { return; }
+  const { channelData, samplesDecoded } = decoded;
+  if (!samplesDecoded) return;
+
+  const nch = channelData.length;
+  const pcm = channelData[0].slice();
+  for (let c = 1; c < nch; c++) {
+    for (let i = 0; i < pcm.length; i++) pcm[i] += channelData[c][i];
+  }
+  if (nch > 1) for (let i = 0; i < pcm.length; i++) pcm[i] /= nch;
+
+  const buf = audioCtx.createBuffer(1, samplesDecoded, 48000);
+  buf.copyToChannel(pcm, 0);
+
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(audioCtx.destination);
+
+  const now = audioCtx.currentTime;
+  if (nextPlay < now) nextPlay = now + BUFFER_MS / 1000;
+  src.start(nextPlay);
+  nextPlay += buf.duration;
+}
+
+playBtn.addEventListener('click', async () => {
+  if (playing) { ws?.close(); return; }
+
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+  }
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+  if (!opusDecoder) {
+    playBtn.disabled = true;
+    wsStatus.textContent = 'デコーダ初期化中...';
+    try {
+      const { OpusDecoder } = OpusDecoderLib;
+      opusDecoder = new OpusDecoder({ channels: 1 });
+      await opusDecoder.ready;
+    } catch (err) {
+      console.error('OpusDecoder init failed:', err);
+      wsStatus.textContent = 'デコーダ初期化失敗';
+      playBtn.disabled = false;
+      return;
+    }
+    playBtn.disabled = false;
+  }
+
+  nextPlay = 0;
+  ws = new WebSocket('ws://' + location.host + '/stream');
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    playing = true;
+    nextPlay = 0;
+    playBtn.textContent = '⏹ 停止';
+    playBtn.classList.add('playing');
+    wsStatus.textContent = '再生中';
+  };
+
+  ws.onmessage = onFrame;
+
+  ws.onclose = () => {
+    resetPlayerUI();
+    try { opusDecoder?.reset(); } catch {}
+  };
+  ws.onerror = () => { wsStatus.textContent = 'エラー: 接続失敗'; };
+});
+</script>
+</body>
+</html>

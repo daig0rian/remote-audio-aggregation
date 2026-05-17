@@ -1,0 +1,18 @@
+[Unit]
+Description=Remote Audio Aggregation Server
+After=network.target
+
+[Service]
+ExecStart=/home/YOUR_USER/.nvm/versions/node/v24.x.x/bin/node /opt/raa-server/src/main.js
+WorkingDirectory=/opt/raa-server
+Restart=always
+RestartSec=5
+User=YOUR_USER
+Environment=NODE_ENV=production
+Environment=LOG_LEVEL=info
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=raa-server
+
+[Install]
+WantedBy=multi-user.target

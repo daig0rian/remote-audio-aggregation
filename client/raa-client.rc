@@ -1,0 +1,78 @@
+// raa-client.rc
+#include "resource.h"
+#include <windows.h>
+
+// Application icon (used by Explorer and window title bar)
+IDI_APP    ICON "icons\\active.ico"
+
+// Tray state icons
+IDI_TRAY_ACTIVE ICON "icons\\active.ico"
+IDI_TRAY_SILENT ICON "icons\\silent.ico"
+IDI_TRAY_ERROR  ICON "icons\\error.ico"
+
+// ---------- 接続 page ----------
+IDD_PAGE_CONNECTION DIALOGEX 0, 0, 220, 160
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_CHILD
+FONT 9, "MS UI Gothic"
+BEGIN
+    LTEXT           "Server IP:", -1,               7,  10, 60, 9
+    EDITTEXT        IDC_SERVER_IP,                  7,  21, 120, 13, ES_AUTOHSCROLL
+    LTEXT           "Port:", -1,                  133, 10, 30,  9
+    EDITTEXT        IDC_SERVER_PORT,              133,  21, 40, 13, ES_AUTOHSCROLL | ES_NUMBER
+
+    LTEXT           "Client ID (SSRC):", -1,        7,  48, 90, 9
+    LTEXT           "",  IDC_SSRC_DISPLAY,           7,  60, 120, 10
+END
+
+// ---------- Audio page ----------
+IDD_PAGE_AUDIO DIALOGEX 0, 0, 220, 160
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_CHILD
+FONT 9, "MS UI Gothic"
+BEGIN
+    GROUPBOX        "Opus Encoder", -1,              7,   7, 200, 40
+    LTEXT           "Bitrate (kbps):", -1,          14,  22, 70, 9
+    EDITTEXT        IDC_BITRATE,                    90,  20, 40, 13, ES_AUTOHSCROLL | ES_NUMBER
+    CONTROL         "", IDC_BITRATE_SPIN, "msctls_updown32", 0x50000026, 130, 20, 11, 13
+END
+
+// ---------- Detection page ----------
+IDD_PAGE_DETECTION DIALOGEX 0, 0, 220, 160
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_CHILD
+FONT 9, "MS UI Gothic"
+BEGIN
+    GROUPBOX        "DTX Settings", -1,              7,   7, 200, 80
+
+    LTEXT           "Silence guard (ms):", -1,       14,  24, 95, 9
+    EDITTEXT        IDC_SILENCE_GUARD,              111,  22, 50, 13, ES_AUTOHSCROLL | ES_NUMBER
+    CONTROL         "", IDC_SILENCE_GUARD_SPIN, "msctls_updown32", 0x50000026, 161, 22, 11, 13
+
+    LTEXT           "Audio guard (ms):", -1,         14,  44, 95, 9
+    EDITTEXT        IDC_AUDIO_GUARD,                111,  42, 50, 13, ES_AUTOHSCROLL | ES_NUMBER
+    CONTROL         "", IDC_AUDIO_GUARD_SPIN, "msctls_updown32", 0x50000026, 161, 42, 11, 13
+END
+
+// ---------- Batch page ----------
+IDD_PAGE_BATCH DIALOGEX 0, 0, 220, 160
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_CHILD
+FONT 9, "MS UI Gothic"
+BEGIN
+    GROUPBOX        "On audio start", -1,             7,   7, 206,  38
+    EDITTEXT        IDC_BATCH_START,                 13,  20, 166, 13, ES_AUTOHSCROLL
+    PUSHBUTTON      "...", IDC_BATCH_START_BROWSE,  182,  20,  24, 13
+
+    GROUPBOX        "On audio stop", -1,              7,  52, 206,  38
+    EDITTEXT        IDC_BATCH_STOP,                  13,  65, 166, 13, ES_AUTOHSCROLL
+    PUSHBUTTON      "...", IDC_BATCH_STOP_BROWSE,   182,  65,  24, 13
+
+    LTEXT           "Timeout (ms):", -1,              7,  98, 60,  9
+    EDITTEXT        IDC_BATCH_TIMEOUT,               70,  96, 60, 13, ES_AUTOHSCROLL | ES_NUMBER
+    CONTROL         "", IDC_BATCH_TIMEOUT_SPIN, "msctls_updown32", 0x50000026, 130, 96, 11, 13
+END
+
+// ---------- General page ----------
+IDD_PAGE_GENERAL DIALOGEX 0, 0, 220, 160
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_CHILD
+FONT 9, "MS UI Gothic"
+BEGIN
+    AUTOCHECKBOX    "Start with Windows", IDC_AUTOSTART, 7, 14, 130, 10
+END

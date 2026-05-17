@@ -1,0 +1,198 @@
+# Remote Audio Aggregation (RAA)
+
+A low-latency audio aggregation system that captures system audio from multiple Windows PCs and streams the mixed audio to a browser via WebSocket — with no SIP, no PBX, and no complex NAT traversal.
+
+## Architecture
+
+```
+[Windows PC-A] ──UDP:4010──┐
+[Windows PC-B] ──UDP:4010──┤──→ [Linux Server] ──WebSocket:4011──→ [Browser]
+[Windows PC-C] ──UDP:4010──┘         │
+                                  WebUI :4011
+```
+
+- **Clients → Server**: UDP one-way (fire & forget). No inbound connections required on the client side.
+- **Browser → Server**: WebSocket outbound connection. Works through NAT with just two port forwards (UDP 4010, TCP 4011).
+- **Audio format**: Opus 48 kHz mono, 20 ms frames, 64 kbps, DTX enabled
+
+## Components
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| [Win32 Client](client/) | ✅ Complete | System tray app, WASAPI process loopback capture, RTP/UDP sender |
+| [Node.js Server](server/) | ✅ Complete | UDP receiver, mixer worker thread, WebSocket broadcaster, REST management API |
+| Zabbix Module | 🔲 Not started | Zabbix dashboard widget wrapping the browser player |
+
+## How It Works
+
+### Audio Pipeline (20 ms cycle)
+
+1. **Win32 client** captures system audio via WASAPI Process Loopback (master-volume-independent), encodes with libopus, and sends RTP packets over UDP.
+2. **Server UDP receiver** parses RTP headers, extracts the SSRC as client ID, decodes Opus → PCM, and enqueues frames into per-client RTP-timestamp-indexed jitter buffers.
+3. **Mixer worker thread** runs a precise 20 ms timer, pulls one frame per client from its jitter buffer (with PLC for missing frames), mixes PCM with per-client volume scaling, re-encodes as Opus, and sends to the main thread.
+4. **Main thread** broadcasts the encoded frame to all WebSocket listeners.
+5. **Browser** decodes Opus via WebAssembly and schedules playback through the Web Audio API.
+
+### Jitter Buffer
+
+Each client has an RTP-timestamp-indexed jitter buffer in the mixer worker:
+
+- Pre-buffers 2 frames (40 ms) before starting playout
+- On frame miss: repeats last frame as PLC for up to 2 cycles (40 ms)
+- `playoutTs` only advances on a real frame, not on PLC — so late-arriving frames can still be used
+- Overflow eviction prefers frames behind `playoutTs` (already played); falls back to oldest and resyncs `playoutTs` to avoid starvation cascades
+- On mute/unmute: clears stale buffered frames and resets `playoutTs`
+
+## Tech Stack
+
+### Server
+- **Runtime**: Node.js ≥ 24 (LTS)
+- **HTTP/REST**: [Fastify](https://fastify.dev/)
+- **WebSocket**: [ws](https://github.com/websockets/ws)
+- **Opus codec**: [@evan/opus](https://github.com/evan/opus) (N-API native binding)
+- **Logging**: [pino](https://getpino.io/) (structured JSON, `LOG_LEVEL` env var)
+- **Threading**: Worker Threads (mixer runs independently of HTTP/WS event loop)
+
+### Win32 Client
+- **Language**: C++ / Win32 API (MSVC)
+- **Audio capture**: WASAPI `AUDCLNT_STREAMFLAGS_PROCESS_LOOPBACK` — captures the process audio mix independently of master volume
+- **Codec**: libopus 1.3.1 (statically linked, no external DLLs)
+- **Network**: Winsock2 UDP, standard RTP framing (RFC 3550 + RFC 7587)
+- **UI**: `Shell_NotifyIcon` system tray with three icon states (active / silent / error)
+- **Config**: `%APPDATA%\raa-client\raa-client.ini`
+
+## Directory Structure
+
+```
+remote-audio-aggregation/
+├── client/                  # Win32 C++ client
+│   ├── src/
+│   │   └── raa-client.cpp   # Main source (WASAPI + libopus + RTP + tray UI)
+│   ├── deps/                # libopus static library and headers
+│   ├── icons/               # active.ico / silent.ico / error.ico
+│   ├── build.bat            # MSVC build script
+│   ├── get_opus.bat         # Downloads and builds libopus from source
+│   ├── app.manifest         # Windows 10+ compatibility manifest
+│   └── raa-client.rc        # Resource file (icons, version info)
+└── server/                  # Node.js server
+    ├── src/
+    │   ├── main.js          # Entry point: UDP + HTTP + WS wiring
+    │   ├── udp.js           # RTP packet receiver and parser
+    │   ├── clients.js       # Client registry, Opus decode, config persistence
+    │   ├── mixer.js         # Worker thread: jitter buffer, PLC, mix, encode
+    │   └── logger.js        # pino instance shared across modules
+    ├── public/
+    │   └── index.html       # Management WebUI + browser audio player
+    ├── package.json
+    ├── deploy.bat           # SCP deploy + remote restart helper
+    └── raa-server.service   # systemd unit file
+```
+
+## Server Setup (Ubuntu 24.04 LTS)
+
+### Prerequisites
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential libopus-dev
+```
+
+### Node.js via nvm
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+source ~/.bashrc
+nvm install 24
+nvm alias default 24
+```
+
+### Install
+
+```bash
+sudo mkdir /opt/raa-server
+sudo chown $USER /opt/raa-server
+cp -r server/* /opt/raa-server/
+cd /opt/raa-server
+npm ci
+```
+
+### Run (foreground)
+
+```bash
+node src/main.js
+# or with debug logging:
+LOG_LEVEL=debug node src/main.js
+```
+
+Default ports: UDP `4010` (audio input), HTTP/WS `4011` (web interface).
+Override with environment variables: `UDP_PORT=5004 HTTP_PORT=8080 node src/main.js`
+
+### Run as systemd service
+
+```bash
+sudo cp /opt/raa-server/raa-server.service /etc/systemd/system/
+# Edit ExecStart path to match your nvm node version if needed
+sudo systemctl daemon-reload
+sudo systemctl enable --now raa-server
+```
+
+```bash
+# Logs
+journalctl -u raa-server -f
+journalctl -u raa-server --since "1 hour ago"
+```
+
+## Win32 Client Build
+
+Requires Visual Studio Build Tools 2022+ with the "Desktop development with C++" workload and Windows SDK.
+
+```bat
+cd client
+build.bat
+```
+
+`build.bat` will automatically fetch and build libopus from source if `deps\libopus.lib` is not present. The output is `client\raa-client.exe`.
+
+### First Launch
+
+On first run with no config file present, the settings dialog opens automatically. Enter the server IP address and click OK. The app then starts capturing and transmitting audio.
+
+The SSRC (client identifier shown in the management WebUI) is generated once and saved to `%APPDATA%\raa-client\raa-client.ini`.
+
+## Management WebUI
+
+Open `http://<server>:4011/` in a browser.
+
+- Lists all active and known clients with friendly name, SSRC, and status
+- Per-client volume slider (0–200%), mute toggle, and name editor
+- Audio player for the mixed stream (click the play button)
+
+## RTP Packet Format
+
+Standard RTP (RFC 3550) with Opus payload type 111 (RFC 7587). Compatible with Wireshark, VLC, and FFmpeg for diagnostics.
+
+```
+Byte 0:    0x80  (V=2, P=0, X=0, CC=0)
+Byte 1:    M | 111  (Marker bit + PT=111)
+Bytes 2-3: Sequence number (big-endian)
+Bytes 4-7: Timestamp (48 kHz ticks, big-endian)
+Bytes 8-11: SSRC (big-endian, client identifier)
+Bytes 12+: Opus payload (20 ms, 48 kHz, mono)
+```
+
+## Port Forwarding (if server is behind NAT)
+
+| Port | Protocol | Direction | Purpose |
+|------|----------|-----------|---------|
+| 4010 | UDP | inbound → server | Audio from Win32 clients |
+| 4011 | TCP | inbound → server | WebUI + WebSocket browser listener |
+
+## Log Levels
+
+| Level | What is logged |
+|-------|---------------|
+| `info` (default) | Server start/stop, client connect/disconnect |
+| `debug` | Decoder resets, per-frame events |
+| `warn` | Jitter buffer starvation, resync events |
+
+Set via `LOG_LEVEL=debug` environment variable or in the systemd unit file.
