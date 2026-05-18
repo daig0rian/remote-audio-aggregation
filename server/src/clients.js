@@ -96,7 +96,7 @@ function get(uuid) { return _clients[uuid] || null; }
 function update(uuid, patch) {
     if (!_clients[uuid]) return false;
     if (patch.friendly_name !== undefined) _clients[uuid].friendly_name = patch.friendly_name;
-    if (patch.volume        !== undefined) _clients[uuid].volume        = Math.max(0, Math.min(2, patch.volume));
+    if (patch.volume        !== undefined) _clients[uuid].volume        = Math.max(0, Math.min(4, patch.volume));
     if (patch.muted         !== undefined) _clients[uuid].muted         = !!patch.muted;
     if (_mixer) _mixer.postMessage({ type: 'update', uuid, volume: _clients[uuid].volume, muted: _clients[uuid].muted });
     save();

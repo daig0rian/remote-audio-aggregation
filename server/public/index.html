@@ -218,7 +218,7 @@ document.getElementById('lang-toggle').addEventListener('click', () => {
 // ---- Volume: logarithmic slider <-> linear gain ----
 // Slider range 0-2 (display 0%-200%)
 // 100% (s=1) = 0 dB = gain 1.0  /  200% (s=2) = +12 dB ≈ gain 4.0
-const VOL_MIN_DB = -60;
+const VOL_MIN_DB = -20;
 const VOL_MAX_DB = 12;
 
 function sliderToGain(s) {
