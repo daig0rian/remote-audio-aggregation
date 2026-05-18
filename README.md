@@ -1,6 +1,6 @@
 # Remote Audio Aggregation (RAA)
 
-A low-latency audio aggregation system that captures system audio from multiple Windows PCs and streams the mixed audio to a browser via WebSocket — with no SIP, no PBX, and no complex NAT traversal.
+A low-latency audio aggregation system that captures system audio from multiple Windows PCs and streams the mixed audio to a browser via WebSocket. No SIP, no PBX — NAT traversal requires only two port forwards.
 
 <table>
   <tr>
