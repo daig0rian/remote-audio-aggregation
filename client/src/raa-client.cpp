@@ -475,9 +475,19 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
     const int FRAME_SAMPLES     = 960;   // 48000Hz × 20ms
     const int RTP_TS_PER_FRAME  = 960;   // RFC 7587: Opus RTP clock is 48kHz regardless of encoder rate
     float    pcm[FRAME_SAMPLES] = {};
-    int      pcm_fill  = 0;
-    uint32_t ts48k     = 0;
-    int      was_silent = 1;
+    int      pcm_fill        = 0;
+    uint32_t ts48k           = 0;
+    int      was_silent      = 1;
+    bool     frame_has_audio = false;
+
+    // Silence heartbeat: send at most one packet every 19 frames (~380ms) during silence.
+    // Genuine audio frames (len > AUDIO_LEN_MIN) are sent immediately and reset the counter.
+    // DTX silence (len<=2) and CN updates (len≈3) are both rate-limited to avoid the
+    // synchronization artifact where the heartbeat and CN update cycle align and produce
+    // paired packets. AUDIO_LEN_MIN=8 safely separates CN updates (~3B) from audio at
+    // 64 kbps (~160B); no valid Opus audio frame at any supported bitrate falls below 8B.
+    static const int AUDIO_LEN_MIN = 8;
+    int hb_counter = 0;
 
     // DTX guard state (ms-based; frames are 20ms each)
     int silence_frames = tc->silence_guard_ms / 20;  // silent frames needed to trigger batch_stop
@@ -502,13 +512,16 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
             int take = (int)(nf - offset); if (take > need) take = need;
             if (flags & AUDCLNT_BUFFERFLAGS_SILENT)
                 memset(pcm + pcm_fill, 0, take * sizeof(float));
-            else
+            else {
                 memcpy(pcm + pcm_fill, src + offset, take * sizeof(float));
+                frame_has_audio = true;
+            }
             pcm_fill += take; offset += take;
 
             if (pcm_fill == FRAME_SAMPLES) {
                 int len = opus_encode_float(enc, pcm, FRAME_SAMPLES, opus_buf, sizeof(opus_buf));
-                BOOL frame_silent = (len <= 2);
+                // DTX leak suppression: treat WASAPI-silent frames as silent regardless of Opus output
+                BOOL frame_silent = !frame_has_audio || (len <= 2);
 
                 if (frame_silent) {
                     silent_count++; active_count = 0;
@@ -529,15 +542,32 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
                     }
                 }
 
-                // Always send to server (silence frames are ≤2 bytes payload).
-                // This lets the server distinguish "connected-silent" from "disconnected".
-                // Batch/tray logic above is independent of sending.
-                {
-                    int plen = build_rtp(pkt_buf, ts48k, tc->ssrc, opus_buf, len, was_silent);
-                    sendto(sock, (char*)pkt_buf, plen, 0, (sockaddr*)&srv, sizeof(srv));
-                    if (!frame_silent) was_silent = 0;  // clear after first audio frame of talkspurt
+                // Send logic (len-based; AUDCLNT_BUFFERFLAGS_SILENT is unreliable on some devices):
+                //   len>AUDIO_LEN_MIN → genuine audio: send immediately, reset counter.
+                //   len<=AUDIO_LEN_MIN → silence or CN update: rate-limited to 1 per 19 frames.
+                //   Treating CN updates (~3B) the same as silence prevents the sync artifact
+                //   where the heartbeat and libopus CN cycle lock step and produce paired packets.
+                bool send_frame = false;
+                if (len > AUDIO_LEN_MIN) {
+                    send_frame = true;
+                    hb_counter = 0;
+                } else {
+                    hb_counter++;
+                    if (hb_counter >= 19) {
+                        send_frame = true;
+                        hb_counter = 0;
+                    }
                 }
-                ts48k += RTP_TS_PER_FRAME; pcm_fill = 0;
+                if (send_frame) {
+                    bool is_audio = (len > AUDIO_LEN_MIN);
+                    // Marker set only on the first audio packet of each talkspurt (RFC 7587 §4.1).
+                    // Silence/heartbeat frames never carry Marker.
+                    int plen = build_rtp(pkt_buf, ts48k, tc->ssrc, opus_buf, len, is_audio && was_silent);
+                    sendto(sock, (char*)pkt_buf, plen, 0, (sockaddr*)&srv, sizeof(srv));
+                    // Update was_silent based on what was actually sent, not on DTX guard state.
+                    was_silent = is_audio ? 0 : 1;
+                }
+                ts48k += RTP_TS_PER_FRAME; pcm_fill = 0; frame_has_audio = false;
             }
         }
         cap->ReleaseBuffer(nf);
