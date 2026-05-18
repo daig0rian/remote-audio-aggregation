@@ -215,6 +215,27 @@ document.getElementById('lang-toggle').addEventListener('click', () => {
   poll();
 });
 
+// ---- Volume: logarithmic slider <-> linear gain ----
+// Slider range 0-2 (display 0%-200%)
+// 100% (s=1) = 0 dB = gain 1.0  /  200% (s=2) = +12 dB ≈ gain 4.0
+const VOL_MIN_DB = -60;
+const VOL_MAX_DB = 12;
+
+function sliderToGain(s) {
+  if (s <= 0) return 0;
+  const dB = s <= 1
+    ? VOL_MIN_DB + s * (0 - VOL_MIN_DB)   // -60 dB → 0 dB
+    : (s - 1) * VOL_MAX_DB;               //   0 dB → +12 dB
+  return Math.pow(10, dB / 20);
+}
+
+function gainToSlider(gain) {
+  if (gain <= 0) return 0;
+  const dB = 20 * Math.log10(gain);
+  if (dB <= 0) return Math.max(0, (dB - VOL_MIN_DB) / (0 - VOL_MIN_DB));
+  return Math.min(2, 1 + dB / VOL_MAX_DB);
+}
+
 // ---- API helpers ----
 async function api(method, url, body) {
   const opts = { method };
@@ -268,7 +289,7 @@ function render(clients, serverNow) {
 
   list.innerHTML = clients.map(c => {
     const state   = clientState(c, serverNow);
-    const volPct  = Math.round(c.volume * 100);
+    const volPct  = Math.round(gainToSlider(c.volume) * 100);
     const rowCls  = state === 'active' ? 'active-row' : state === 'silent' ? 'silent-row' : '';
     const dotCls  = state === 'active' ? 'active'     : state === 'silent' ? 'silent'     : '';
     const statusTxt = state === 'active' ? T.statusActive
@@ -289,7 +310,7 @@ function render(clients, serverNow) {
       <div class="row-vol">
         <span class="vol-pct">${volPct}%</span>
         <input class="vol-slider" type="range" min="0" max="2" step="0.01"
-               value="${c.volume}" data-uuid="${c.uuid}">
+               value="${gainToSlider(c.volume).toFixed(4)}" data-uuid="${c.uuid}">
       </div>
       <span class="row-status">${statusTxt}</span>
       <button class="row-del delete-btn" data-uuid="${c.uuid}" title="${T.deleteTitle}">✕</button>
@@ -337,7 +358,7 @@ list.addEventListener('input', e => {
 list.addEventListener('change', async e => {
   const uuid = e.target.dataset.uuid;
   if (!uuid || !e.target.classList.contains('vol-slider')) return;
-  await api('PATCH', `/api/clients/${uuid}`, { volume: parseFloat(e.target.value) }).catch(console.error);
+  await api('PATCH', `/api/clients/${uuid}`, { volume: sliderToGain(parseFloat(e.target.value)) }).catch(console.error);
 });
 
 // Mute & Delete
