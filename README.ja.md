@@ -1,5 +1,7 @@
 # Remote Audio Aggregation (RAA)
 
+[English version here](README.md)
+
 複数の Windows PC のシステム音声をキャプチャし、混合した音声を WebSocket 経由でブラウザにストリーミングする低遅延音声集約システムです。SIP・PBX 不要、ポートフォワード 2 本だけで NAT を越えられます。
 
 <table>
