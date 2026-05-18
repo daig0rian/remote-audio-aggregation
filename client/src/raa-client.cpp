@@ -84,6 +84,75 @@
 #define IDC_AUTOSTART           3040
 
 // ============================================================
+// Localization
+// ============================================================
+
+struct Strings {
+    const wchar_t* tray_active;
+    const wchar_t* tray_silent;
+    const wchar_t* tray_error;
+    const wchar_t* status_active;
+    const wchar_t* status_silent;
+    const wchar_t* status_error;
+    const wchar_t* status_fmt;
+    const wchar_t* menu_settings;
+    const wchar_t* menu_open_log;
+    const wchar_t* menu_reload;
+    const wchar_t* menu_exit;
+    const wchar_t* sheet_caption;
+    const wchar_t* tab_connection;
+    const wchar_t* tab_audio;
+    const wchar_t* tab_detection;
+    const wchar_t* tab_batch;
+    const wchar_t* tab_general;
+    const wchar_t* file_filter;
+};
+
+static const Strings STR_JA = {
+    L"RAA Client - 送信中",
+    L"RAA Client - 無音",
+    L"RAA Client - エラー",
+    L"送信中",
+    L"無音",
+    L"エラー",
+    L"状態: %s  (SSRC: %08x)",
+    L"設定...",
+    L"ログフォルダを開く",
+    L"設定ファイルを再読み込み",
+    L"終了",
+    L"RAA Client 設定",
+    L"接続",
+    L"オーディオ",
+    L"無音検知",
+    L"バッチ",
+    L"全般",
+    L"スクリプト (*.bat;*.cmd;*.exe;*.ps1)\0*.bat;*.cmd;*.exe;*.ps1\0すべて (*.*)\0*.*\0",
+};
+
+static const Strings STR_EN = {
+    L"RAA Client - Sending",
+    L"RAA Client - Silent",
+    L"RAA Client - Error",
+    L"Sending",
+    L"Silent",
+    L"Error",
+    L"Status: %s  (SSRC: %08x)",
+    L"Settings...",
+    L"Open log folder",
+    L"Reload settings",
+    L"Exit",
+    L"RAA Client Settings",
+    L"Connection",
+    L"Audio",
+    L"Detection",
+    L"Batch",
+    L"General",
+    L"Scripts (*.bat;*.cmd;*.exe;*.ps1)\0*.bat;*.cmd;*.exe;*.ps1\0All files (*.*)\0*.*\0",
+};
+
+static const Strings* S = &STR_JA;
+
+// ============================================================
 // Config
 // ============================================================
 
@@ -258,9 +327,9 @@ static void tray_init(HWND hwnd) {
 static void tray_update(AudioState state) {
     g_audio_state = state;
     g_nid.hIcon = g_icons[state];
-    const wchar_t* tip = (state == AS_ACTIVE) ? L"RAA Client - 送信中"
-                       : (state == AS_ERROR)  ? L"RAA Client - エラー"
-                                              : L"RAA Client - 無音";
+    const wchar_t* tip = (state == AS_ACTIVE) ? S->tray_active
+                       : (state == AS_ERROR)  ? S->tray_error
+                                              : S->tray_silent;
     wcscpy_s(g_nid.szTip, tip);
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
 }
@@ -274,16 +343,16 @@ static void show_tray_menu(HWND hwnd) {
     HMENU hm = CreatePopupMenu();
 
     wchar_t status[64];
-    const wchar_t* s = (g_audio_state == AS_ACTIVE) ? L"送信中"
-                     : (g_audio_state == AS_ERROR)  ? L"エラー" : L"無音";
-    swprintf_s(status, 64, L"状態: %s  (SSRC: %08x)", s, g_ssrc);
+    const wchar_t* s = (g_audio_state == AS_ACTIVE) ? S->status_active
+                     : (g_audio_state == AS_ERROR)  ? S->status_error : S->status_silent;
+    swprintf_s(status, 64, S->status_fmt, s, g_ssrc);
     AppendMenuW(hm, MF_STRING | MF_DISABLED | MF_GRAYED, IDM_STATUS, status);
     AppendMenuW(hm, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(hm, MF_STRING, IDM_SETTINGS, L"設定...");
-    AppendMenuW(hm, MF_STRING, IDM_OPEN_LOG, L"ログフォルダを開く");
-    AppendMenuW(hm, MF_STRING, IDM_RELOAD,   L"設定ファイルを再読み込み");
+    AppendMenuW(hm, MF_STRING, IDM_SETTINGS, S->menu_settings);
+    AppendMenuW(hm, MF_STRING, IDM_OPEN_LOG, S->menu_open_log);
+    AppendMenuW(hm, MF_STRING, IDM_RELOAD,   S->menu_reload);
     AppendMenuW(hm, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(hm, MF_STRING, IDM_EXIT, L"終了");
+    AppendMenuW(hm, MF_STRING, IDM_EXIT, S->menu_exit);
 
     SetForegroundWindow(hwnd);
     POINT pt; GetCursorPos(&pt);
@@ -644,7 +713,7 @@ static void browse_batch(HWND hdlg, int edit_id) {
     GetDlgItemTextW(hdlg, edit_id, file, MAX_PATH);
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner   = hdlg;
-    ofn.lpstrFilter = L"スクリプト (*.bat;*.cmd;*.exe;*.ps1)\0*.bat;*.cmd;*.exe;*.ps1\0すべて (*.*)\0*.*\0";
+    ofn.lpstrFilter = S->file_filter;
     ofn.lpstrFile   = file;
     ofn.nMaxFile    = MAX_PATH;
     ofn.Flags       = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
@@ -775,7 +844,7 @@ static BOOL show_settings(HWND hwnd) {
     s_tmp_autostart = g_cfg.autostart;
 
     PROPSHEETPAGEW pages[5] = {};
-    const wchar_t* titles[] = { L"接続", L"オーディオ", L"無音検知", L"バッチ", L"全般" };
+    const wchar_t* titles[] = { S->tab_connection, S->tab_audio, S->tab_detection, S->tab_batch, S->tab_general };
     DLGPROC procs[]  = { page_connection, page_audio, page_detection, page_batch, page_general };
     int     ids[]    = { IDD_PAGE_CONNECTION, IDD_PAGE_AUDIO, IDD_PAGE_DETECTION,
                          IDD_PAGE_BATCH, IDD_PAGE_GENERAL };
@@ -794,7 +863,7 @@ static BOOL show_settings(HWND hwnd) {
     hdr.dwFlags     = PSH_PROPSHEETPAGE | PSH_NOAPPLYNOW | PSH_NOCONTEXTHELP;
     hdr.hwndParent  = hwnd;
     hdr.hInstance   = GetModuleHandleW(NULL);
-    hdr.pszCaption  = L"RAA Client 設定";
+    hdr.pszCaption  = S->sheet_caption;
     hdr.nPages      = 5;
     hdr.ppsp        = pages;
 
@@ -868,6 +937,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
 
     log_init();
     logf("raa-client starting");
+
+    S = (PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_JAPANESE) ? &STR_JA : &STR_EN;
 
     // Generate a new SSRC; load_config() will override it if INI exists
     UUID u; UuidCreate(&u);

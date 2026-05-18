@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html id="html-root" lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,8 +8,14 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: 'Segoe UI', sans-serif; background: #12121f; color: #e0e0e0; padding: 1.5em 2em; }
 
-h1 { font-size: 1.3em; font-weight: 600; color: #fff; margin-bottom: 0.25em; }
+.page-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.25em; }
+h1 { font-size: 1.3em; font-weight: 600; color: #fff; }
 .subtitle { font-size: 0.8em; color: #666; margin-bottom: 1.2em; }
+.lang-toggle {
+  background: none; border: 1px solid #3a3a5a; color: #888;
+  border-radius: 4px; padding: 2px 8px; font-size: 0.75em; cursor: pointer;
+}
+.lang-toggle:hover { border-color: #4caf50; color: #4caf50; }
 
 /* Player */
 .player-section {
@@ -113,21 +119,102 @@ h1 { font-size: 1.3em; font-weight: 600; color: #fff; margin-bottom: 0.25em; }
 </head>
 <body>
 
-<h1>RAA Server</h1>
-<p class="subtitle">クライアント管理 — 2秒ごとに自動更新</p>
+<div class="page-header">
+  <h1>RAA Server</h1>
+  <button class="lang-toggle" id="lang-toggle"></button>
+</div>
+<p class="subtitle" id="subtitle"></p>
 
 <div class="player-section">
-  <button class="play-btn" id="play-btn">▶ 混合音声を再生</button>
-  <div id="ws-status">停止中</div>
+  <button class="play-btn" id="play-btn"></button>
+  <div id="ws-status"></div>
   <div id="meter"><div id="bar"></div></div>
 </div>
 
-<div class="client-list" id="client-list">
-  <p class="empty">読み込み中...</p>
-</div>
+<div class="client-list" id="client-list"></div>
 
 <script src="/opus-decoder.bundle.js" charset="UTF-8"></script>
 <script>
+// ---- i18n ----
+const TRANSLATIONS = {
+  ja: {
+    htmlLang:       'ja',
+    langToggle:     'EN',
+    subtitle:       'Remote Audio Aggregation & Mixing Server',
+    playBtn:        '▶ モニター',
+    stopBtn:        '⏹ 停止',
+    wsIdle:         '停止中',
+    wsPlaying:      'モニター中',
+    wsInitializing: 'デコーダ初期化中...',
+    wsInitFailed:   'デコーダ初期化失敗',
+    wsConnError:    'エラー: 接続失敗',
+    emptyLoading:   '読み込み中...',
+    emptyNoClients: 'クライアント未接続',
+    ageNever:       '未受信',
+    ageNow:         '受信中',
+    ageSec:  n => `${n}秒前`,
+    ageMin:  n => `${n}分前`,
+    ageHour: n => `${n}時間前`,
+    ageDay:  n => `${n}日前`,
+    statusActive:  '🟢 アクティブ',
+    statusSilent:  '🟡 アイドル',
+    statusOffline: '⚫ オフライン',
+    namePlaceholder: '(名前未設定)',
+    nameTitle:    'クリックして名前を編集',
+    deleteTitle:  '削除',
+    confirmDelete: uuid => `クライアント ${uuid} を削除しますか？`,
+  },
+  en: {
+    htmlLang:       'en',
+    langToggle:     'JA',
+    subtitle:       'Remote Audio Aggregation & Mixing Server',
+    playBtn:        '▶ Monitor',
+    stopBtn:        '⏹ Stop',
+    wsIdle:         'Idle',
+    wsPlaying:      'Monitoring',
+    wsInitializing: 'Initializing decoder...',
+    wsInitFailed:   'Decoder init failed',
+    wsConnError:    'Error: connection failed',
+    emptyLoading:   'Loading...',
+    emptyNoClients: 'No clients connected',
+    ageNever:       'Never',
+    ageNow:         'Now',
+    ageSec:  n => `${n}s ago`,
+    ageMin:  n => `${n}m ago`,
+    ageHour: n => `${n}h ago`,
+    ageDay:  n => `${n}d ago`,
+    statusActive:  '🟢 Active',
+    statusSilent:  '🟡 Idle',
+    statusOffline: '⚫ Offline',
+    namePlaceholder: '(unnamed)',
+    nameTitle:    'Click to edit name',
+    deleteTitle:  'Delete',
+    confirmDelete: uuid => `Delete client ${uuid}?`,
+  },
+};
+
+const _stored = localStorage.getItem('raa-lang');
+let currentLang = (_stored === 'en' || _stored === 'ja') ? _stored
+                : navigator.language.startsWith('ja') ? 'ja' : 'en';
+let T = TRANSLATIONS[currentLang];
+let playing = false;
+
+function applyLang() {
+  document.getElementById('html-root').lang   = T.htmlLang;
+  document.getElementById('lang-toggle').textContent = T.langToggle;
+  document.getElementById('subtitle').textContent    = T.subtitle;
+  document.getElementById('play-btn').textContent    = playing ? T.stopBtn : T.playBtn;
+  if (!playing) document.getElementById('ws-status').textContent = T.wsIdle;
+}
+
+document.getElementById('lang-toggle').addEventListener('click', () => {
+  currentLang = currentLang === 'ja' ? 'en' : 'ja';
+  localStorage.setItem('raa-lang', currentLang);
+  T = TRANSLATIONS[currentLang];
+  applyLang();
+  poll();
+});
+
 // ---- API helpers ----
 async function api(method, url, body) {
   const opts = { method };
@@ -145,13 +232,13 @@ let cache = {};
 
 // ---- Age formatting ----
 function fmtAge(ts, serverNow) {
-  if (!ts) return '未受信';
+  if (!ts) return T.ageNever;
   const s = Math.floor((serverNow - new Date(ts)) / 1000);
-  if (s <    2) return '受信中';
-  if (s <   60) return `${s}秒前`;
-  if (s < 3600) return `${Math.floor(s / 60)}分前`;
-  if (s < 86400) return `${Math.floor(s / 3600)}時間前`;
-  return `${Math.floor(s / 86400)}日前`;
+  if (s <    2) return T.ageNow;
+  if (s <   60) return T.ageSec(s);
+  if (s < 3600) return T.ageMin(Math.floor(s / 60));
+  if (s < 86400) return T.ageHour(Math.floor(s / 3600));
+  return T.ageDay(Math.floor(s / 86400));
 }
 
 function esc(s) {
@@ -171,7 +258,7 @@ function render(clients, serverNow) {
   const list = document.getElementById('client-list');
 
   if (clients.length === 0) {
-    list.innerHTML = '<p class="empty">クライアント未接続</p>';
+    list.innerHTML = `<p class="empty">${T.emptyNoClients}</p>`;
     return;
   }
 
@@ -184,17 +271,17 @@ function render(clients, serverNow) {
     const volPct  = Math.round(c.volume * 100);
     const rowCls  = state === 'active' ? 'active-row' : state === 'silent' ? 'silent-row' : '';
     const dotCls  = state === 'active' ? 'active'     : state === 'silent' ? 'silent'     : '';
-    const statusTxt = state === 'active'  ? '🟢 受信中'
-                    : state === 'silent'  ? '🟡 無音（接続中）'
-                    :                       '⚫ 未接続 ' + fmtAge(c.last_seen, serverNow);
+    const statusTxt = state === 'active' ? T.statusActive
+                    : state === 'silent' ? T.statusSilent
+                    :                      T.statusOffline + ' ' + fmtAge(c.last_seen, serverNow);
     return `
     <div class="client-row ${rowCls}" data-uuid="${c.uuid}">
       <div class="row-dot dot ${dotCls}"></div>
       <input class="row-name name-input" type="text"
              data-uuid="${c.uuid}"
              value="${esc(c.friendly_name)}"
-             placeholder="(名前未設定)"
-             title="クリックして名前を編集">
+             placeholder="${T.namePlaceholder}"
+             title="${T.nameTitle}">
       <span class="row-ssrc ssrc-tag">${c.uuid}</span>
       <button class="row-mute mute-btn ${c.muted ? 'muted' : ''}" data-uuid="${c.uuid}">
         ${c.muted ? '🔇' : '🔊'}
@@ -205,7 +292,7 @@ function render(clients, serverNow) {
                value="${c.volume}" data-uuid="${c.uuid}">
       </div>
       <span class="row-status">${statusTxt}</span>
-      <button class="row-del delete-btn" data-uuid="${c.uuid}" title="削除">✕</button>
+      <button class="row-del delete-btn" data-uuid="${c.uuid}" title="${T.deleteTitle}">✕</button>
     </div>`;
   }).join('');
 
@@ -230,9 +317,6 @@ async function poll() {
     console.error('poll:', e);
   }
 }
-
-poll();
-setInterval(poll, 2000);
 
 // ---- Event delegation ----
 const list = document.getElementById('client-list');
@@ -269,7 +353,7 @@ list.addEventListener('click', async e => {
   }
 
   if (e.target.classList.contains('delete-btn')) {
-    if (!confirm(`クライアント ${uuid} を削除しますか？`)) return;
+    if (!confirm(T.confirmDelete(uuid))) return;
     await api('DELETE', `/api/clients/${uuid}`).catch(console.error);
     poll();
   }
@@ -287,16 +371,16 @@ list.addEventListener('blur', async e => {
 const playBtn  = document.getElementById('play-btn');
 const wsStatus = document.getElementById('ws-status');
 const bar      = document.getElementById('bar');
-let ws = null, playing = false;
+let ws = null;
 let audioCtx = null, opusDecoder = null, nextPlay = 0;
 
 const BUFFER_MS = 200;  // jitter buffer size
 
 function resetPlayerUI() {
   playing = false;
-  playBtn.textContent = '▶ 混合音声を再生';
+  playBtn.textContent = T.playBtn;
   playBtn.classList.remove('playing');
-  wsStatus.textContent = '停止中';
+  wsStatus.textContent = T.wsIdle;
   bar.style.width = '0';
 }
 
@@ -340,14 +424,14 @@ playBtn.addEventListener('click', async () => {
 
   if (!opusDecoder) {
     playBtn.disabled = true;
-    wsStatus.textContent = 'デコーダ初期化中...';
+    wsStatus.textContent = T.wsInitializing;
     try {
       const { OpusDecoder } = OpusDecoderLib;
       opusDecoder = new OpusDecoder({ channels: 1 });
       await opusDecoder.ready;
     } catch (err) {
       console.error('OpusDecoder init failed:', err);
-      wsStatus.textContent = 'デコーダ初期化失敗';
+      wsStatus.textContent = T.wsInitFailed;
       playBtn.disabled = false;
       return;
     }
@@ -361,9 +445,9 @@ playBtn.addEventListener('click', async () => {
   ws.onopen = () => {
     playing = true;
     nextPlay = 0;
-    playBtn.textContent = '⏹ 停止';
+    playBtn.textContent = T.stopBtn;
     playBtn.classList.add('playing');
-    wsStatus.textContent = '再生中';
+    wsStatus.textContent = T.wsPlaying;
   };
 
   ws.onmessage = onFrame;
@@ -372,8 +456,13 @@ playBtn.addEventListener('click', async () => {
     resetPlayerUI();
     try { opusDecoder?.reset(); } catch {}
   };
-  ws.onerror = () => { wsStatus.textContent = 'エラー: 接続失敗'; };
+  ws.onerror = () => { wsStatus.textContent = T.wsConnError; };
 });
+
+// Apply initial language
+applyLang();
+poll();
+setInterval(poll, 2000);
 </script>
 </body>
 </html>
