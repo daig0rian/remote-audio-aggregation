@@ -2,6 +2,13 @@
 
 複数の Windows PC のシステム音声をキャプチャし、混合した音声を WebSocket 経由でブラウザにストリーミングする低遅延音声集約システムです。SIP・PBX 不要、複雑な NAT 越えも不要です。
 
+<table>
+  <tr>
+    <td align="center"><b>Win32 クライアント</b><br><img src="docs/screenshot-client.png" alt="Win32 クライアント" width="380"></td>
+    <td align="center"><b>サーバー管理 WebUI</b><br><img src="docs/screenshot-webui-ja.png" alt="サーバー管理 WebUI" width="380"></td>
+  </tr>
+</table>
+
 ## アーキテクチャ
 
 ```

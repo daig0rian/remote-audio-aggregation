@@ -2,6 +2,13 @@
 
 A low-latency audio aggregation system that captures system audio from multiple Windows PCs and streams the mixed audio to a browser via WebSocket — with no SIP, no PBX, and no complex NAT traversal.
 
+<table>
+  <tr>
+    <td align="center"><b>Win32 Client</b><br><img src="docs/screenshot-client.png" alt="Win32 Client" width="380"></td>
+    <td align="center"><b>Server WebUI</b><br><img src="docs/screenshot-webui-en.png" alt="Server WebUI" width="380"></td>
+  </tr>
+</table>
+
 ## Architecture
 
 ```
