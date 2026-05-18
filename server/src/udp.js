@@ -37,7 +37,10 @@ function start(port) {
         const clientId = ssrc.toString(16).padStart(8, '0'); // e.g. "a1b2c3d4"
         const marker   = (buf[1] & 0x80) !== 0;  // RFC 7587 §4.1: first packet of new talkspurt
         const opusData = buf.subarray(payloadStart);
-        const isSilence = opusData.length <= 2;
+        // Client sends DTX silence (len=1) and CN updates (len=3) as rate-limited heartbeats.
+        // Both are non-audio: match client's AUDIO_LEN_MIN=8 so CN updates don't trigger
+        // spurious gap resets (which would unnecessarily reset the decoder and jitter buffer).
+        const isSilence = opusData.length <= 8;
 
         clients.touch(clientId, isSilence);
         if (!isSilence) clients.setLastFrame(clientId, opusData, marker, rtpTs);

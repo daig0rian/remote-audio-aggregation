@@ -2,7 +2,7 @@
 setlocal
 set SERVER=192.168.11.38
 set REMOTE=/opt/raa-server
-set NODE=/home/YOUR_USER/.nvm/versions/node/v24.x.x/bin/node
+set NODE=/home/daigo/.nvm/versions/node/v24.15.0/bin/node
 set SCP="C:\Program Files\Git\usr\bin\scp.exe"
 set SSH="C:\Program Files\Git\usr\bin\ssh.exe"
 set ROOT=%~dp0
@@ -14,6 +14,8 @@ echo Deploying to %SERVER% ...
 %SCP% "%ROOT%src\mixer.js"      %SERVER%:%REMOTE%/src/mixer.js      || goto :err
 %SCP% "%ROOT%src\udp.js"        %SERVER%:%REMOTE%/src/udp.js        || goto :err
 %SCP% "%ROOT%src\clients.js"    %SERVER%:%REMOTE%/src/clients.js    || goto :err
+%SSH% %SERVER% "mkdir -p %REMOTE%/bench"
+%SCP% "%ROOT%bench\load-test.js" %SERVER%:%REMOTE%/bench/load-test.js || goto :err
 %SCP% "%ROOT%public\index.html"             %SERVER%:%REMOTE%/public/index.html             || goto :err
 %SCP% "%ROOT%public\opus-decoder.bundle.js" %SERVER%:%REMOTE%/public/opus-decoder.bundle.js || goto :err
 

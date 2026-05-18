@@ -2,15 +2,11 @@
 
 const fs   = require('fs');
 const path = require('path');
-const { Decoder } = require('@evan/opus');
 const log  = require('./logger').child({ name: 'clients' });
 
-const CONFIG_PATH   = path.join(__dirname, '..', 'config.json');
-const SAMPLE_RATE   = 48000;
-const CHANNELS      = 1;
-const FRAME_SAMPLES = 960;
+const CONFIG_PATH = path.join(__dirname, '..', 'config.json');
 
-let _clients = {};  // uuid -> { friendly_name, volume, muted, created_at, last_seen, _decoder }
+let _clients = {};  // uuid -> { friendly_name, volume, muted, created_at, last_seen, ... }
 let _mixer   = null;
 
 function setMixer(worker) { _mixer = worker; }
@@ -24,8 +20,7 @@ function load() {
                 friendly_name: c.friendly_name || '', volume: c.volume ?? 1.0, muted: c.muted ?? false,
                 created_at: c.created_at, last_seen: c.last_seen,
                 last_audio: null, _audioStreak: 0,
-                _decoder: new Decoder({ channels: CHANNELS, sample_rate: SAMPLE_RATE }),
-                _lastDecoded: 0,
+                _lastFrameMs: 0,
                 _nextRtpTs: 0,
             };
         }
@@ -54,18 +49,15 @@ function touch(uuid, isSilence = false) {
             friendly_name: '', volume: 1.0, muted: false,
             created_at: now, last_seen: now,
             last_audio: null, _audioStreak: 0,
-            _decoder: new Decoder({ channels: CHANNELS, sample_rate: SAMPLE_RATE }),
-            _lastDecoded: 0,
+            _lastFrameMs: 0,
             _nextRtpTs: 0,
         };
         log.info({ uuid }, 'new client');
-        // Not saved here — persisted only when user customizes (name/volume/mute)
     } else {
         _clients[uuid].last_seen = now;
         if (!isSilence) {
             // Require 3 consecutive non-silence frames before marking audio active.
-            // This filters sporadic noise-floor frames (which the Opus encoder produces
-            // at ~2-5% rate even during subjective silence) from genuine sustained audio.
+            // This filters sporadic noise-floor frames from genuine sustained audio.
             const streak = ++_clients[uuid]._audioStreak;
             if (streak >= 3) _clients[uuid].last_audio = now;
         } else {
@@ -74,31 +66,27 @@ function touch(uuid, isSilence = false) {
     }
 }
 
+// Opus デコードは mixer worker 側で行う。
+// ここでは gap/marker から reset フラグを計算し、生 Opus データをそのまま転送する。
+// メインスレッドのイベントループをブロックしない。
 function setLastFrame(uuid, opusData, marker = false, rtpTs = 0) {
     const c = _clients[uuid];
     if (!c || !_mixer) return;
 
     const now = Date.now();
-    const reset = marker || (c._lastDecoded > 0 && now - c._lastDecoded > 300);
+    const gapMs = c._lastFrameMs > 0 ? now - c._lastFrameMs : 0;
+    const reset = marker || (c._lastFrameMs > 0 && gapMs > 300);
     if (reset) {
-        const reason = marker ? 'marker' : `gap ${now - c._lastDecoded}ms`;
-        // audioStreak < 3 は主観的無音中の DTX 漏れフレーム — リセット自体は必要だがログは抑制
-        if (c._audioStreak >= 3) {
-            log.debug({ uuid, reason }, 'decoder reset');
+        const reason = marker ? `marker (gap ${gapMs}ms)` : `gap ${gapMs}ms`;
+        // Marker resets are always logged. Gap resets are suppressed when audioStreak < 3
+        // (DTX leak frames during subjective silence, not genuine audio resumption).
+        if (marker || c._audioStreak >= 3) {
+            log.info({ uuid, reason, streak: c._audioStreak }, 'decoder reset');
         }
-        c._decoder = new Decoder({ channels: CHANNELS, sample_rate: SAMPLE_RATE });
     }
-    c._lastDecoded = now;
+    c._lastFrameMs = now;
 
-    try {
-        const raw     = c._decoder.decode(opusData);
-        const pcmData = Buffer.from(raw);
-        // reset=true instructs the mixer to clear its jitter buffer and restart playout.
-        // The jitter buffer's startup delay (JITTER_BUF_FRAMES) replaces the old _muteFrames logic.
-        _mixer.postMessage({ type: 'frame', uuid, pcmData, rtpTs: rtpTs >>> 0, reset, volume: c.volume, muted: c.muted });
-    } catch {
-        // decode error: skip this frame
-    }
+    _mixer.postMessage({ type: 'frame', uuid, opusData, rtpTs: rtpTs >>> 0, reset, volume: c.volume, muted: c.muted });
 }
 
 function getAll() { return _clients; }
@@ -143,7 +131,7 @@ function postRawPCM(uuid, pcmData) {
     const c = _clients[uuid];
     if (!c || !_mixer) return;
     const rtpTs = c._nextRtpTs;
-    c._nextRtpTs = (c._nextRtpTs + 960) >>> 0;  // unsigned 32-bit increment
+    c._nextRtpTs = (c._nextRtpTs + 960) >>> 0;
     _mixer.postMessage({ type: 'frame', uuid, pcmData, rtpTs, reset: false, volume: c.volume, muted: c.muted });
 }
 

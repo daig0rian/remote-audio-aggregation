@@ -2,6 +2,7 @@
 
 const path          = require('path');
 const { Worker }    = require('worker_threads');
+const { monitorEventLoopDelay } = require('perf_hooks');
 const Fastify       = require('fastify');
 const { WebSocketServer } = require('ws');
 const log           = require('./logger');
@@ -12,6 +13,18 @@ const HTTP_PORT = parseInt(process.env.HTTP_PORT || '4011');
 
 // ---- 起動 ----
 clients.load();
+
+// イベントループ遅延を5秒毎に記録（メインスレッドの詰まり検知）
+const eldMonitor = monitorEventLoopDelay({ resolution: 10 });
+eldMonitor.enable();
+setInterval(() => {
+    log.info({
+        mean_ms: (eldMonitor.mean    / 1e6).toFixed(2),
+        p99_ms:  (eldMonitor.percentile(99) / 1e6).toFixed(2),
+        max_ms:  (eldMonitor.max     / 1e6).toFixed(2),
+    }, 'event loop delay');
+    eldMonitor.reset();
+}, 5000);
 udp.start(UDP_PORT);
 setInterval(clients.cleanup, 30000);
 
