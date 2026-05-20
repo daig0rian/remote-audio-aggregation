@@ -18,6 +18,8 @@ jobs:
         id: pack
         run: |
           cd server
+          VERSION=${GITHUB_REF_NAME#v}
+          npm version $VERSION --no-git-tag-version
           npm pack
           echo "tarball=$(ls raa-server-*.tgz)" >> "$GITHUB_OUTPUT"
 
