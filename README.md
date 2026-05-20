@@ -32,6 +32,16 @@ A low-latency audio aggregation system that captures system audio from multiple 
 | [Node.js Server](server/) | ✅ Complete | UDP receiver, mixer worker thread, WebSocket broadcaster, REST management API |
 | Zabbix Module | 🔲 Not started | Zabbix dashboard widget wrapping the browser player |
 
+## Download
+
+Pre-built binaries are published to [GitHub Releases](https://github.com/daig0rian/remote-audio-aggregation/releases) on every tagged version.
+
+| Asset | Description |
+|-------|-------------|
+| `raa-client.exe` | Win32 client — download and run, no installer needed |
+| `raa-server-x.y.z.tgz` | Server Node.js package |
+| `install.sh` | Server install script |
+
 ## How It Works
 
 ### Audio Pipeline (20 ms cycle)
@@ -177,12 +187,22 @@ nvm alias default 24
 
 ### Install
 
+**Recommended — one-liner with install.sh:**
+
+```bash
+curl -fsSL https://github.com/daig0rian/remote-audio-aggregation/releases/latest/download/install.sh | bash
+```
+
+The script checks for Node.js ≥ 24, installs `build-essential` and `libopus-dev` if missing, downloads the server package to `/opt/raa-server`, and runs `npm install` (which compiles the `@evan/opus` native addon).
+
+**Alternative — from source:**
+
 ```bash
 sudo mkdir /opt/raa-server
 sudo chown $USER /opt/raa-server
 cp -r server/* /opt/raa-server/
 cd /opt/raa-server
-npm ci
+npm install --omit=dev
 ```
 
 ### Run (foreground)
@@ -211,7 +231,13 @@ journalctl -u raa-server -f
 journalctl -u raa-server --since "1 hour ago"
 ```
 
-## Win32 Client Build
+## Win32 Client
+
+### Download (recommended)
+
+Download `raa-client.exe` from [GitHub Releases](https://github.com/daig0rian/remote-audio-aggregation/releases). No installer needed — just run the `.exe` directly.
+
+### Build from Source
 
 Requires Visual Studio Build Tools 2022+ with the "Desktop development with C++" workload and Windows SDK.
 

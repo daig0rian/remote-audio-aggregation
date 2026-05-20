@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  server-pack:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pack server tarball
+        id: pack
+        run: |
+          cd server
+          npm pack
+          echo "tarball=$(ls raa-server-*.tgz)" >> "$GITHUB_OUTPUT"
+
+      - name: Create release and upload server assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            server/${{ steps.pack.outputs.tarball }}
+            server/install.sh
+          generate_release_notes: true
+
+  client-build:
+    needs: server-pack
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build raa-client.exe
+        working-directory: client
+        shell: cmd
+        run: build.bat
+
+      - name: Upload client to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: client/raa-client.exe

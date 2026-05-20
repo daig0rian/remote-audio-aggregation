@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "description": "Remote Audio Aggregation Server",
   "main": "src/main.js",
+  "files": [
+    "src/",
+    "public/",
+    "assets/"
+  ],
   "scripts": {
     "start": "node src/main.js",
     "start:debug": "LOG_LEVEL=debug node src/main.js"

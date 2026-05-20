@@ -32,6 +32,16 @@
 | [Node.js サーバー](server/) | ✅ 完成 | UDP 受信、ミキサー Worker Thread、WebSocket ブロードキャスト、REST 管理 API |
 | Zabbix モジュール | 🔲 未着手 | ブラウザプレイヤーを組み込んだ Zabbix ダッシュボードウィジェット |
 
+## ダウンロード
+
+タグを打つたびに [GitHub Releases](https://github.com/daig0rian/remote-audio-aggregation/releases) へ自動公開されます。
+
+| ファイル | 内容 |
+|----------|------|
+| `raa-client.exe` | Win32 クライアント — インストーラー不要、そのまま実行 |
+| `raa-server-x.y.z.tgz` | サーバー Node.js パッケージ |
+| `install.sh` | サーバーインストールスクリプト |
+
 ## 動作の仕組み
 
 ### 音声パイプライン（20 ms サイクル）
@@ -177,12 +187,22 @@ nvm alias default 24
 
 ### インストール
 
+**推奨 — install.sh ワンライナー:**
+
+```bash
+curl -fsSL https://github.com/daig0rian/remote-audio-aggregation/releases/latest/download/install.sh | bash
+```
+
+Node.js ≥ 24 を確認し、`build-essential` と `libopus-dev` が未インストールの場合は自動導入します。その後 `/opt/raa-server` にサーバーパッケージを展開し、`npm install`（`@evan/opus` ネイティブアドオンのコンパイルを含む）を実行します。
+
+**代替 — ソースから:**
+
 ```bash
 sudo mkdir /opt/raa-server
 sudo chown $USER /opt/raa-server
 cp -r server/* /opt/raa-server/
 cd /opt/raa-server
-npm ci
+npm install --omit=dev
 ```
 
 ### 起動（フォアグラウンド）
@@ -211,7 +231,13 @@ journalctl -u raa-server -f
 journalctl -u raa-server --since "1 hour ago"
 ```
 
-## Win32 クライアントのビルド
+## Win32 クライアント
+
+### ダウンロード（推奨）
+
+[GitHub Releases](https://github.com/daig0rian/remote-audio-aggregation/releases) から `raa-client.exe` をダウンロードして、そのまま実行してください。インストーラーは不要です。
+
+### ソースからビルド
 
 Visual Studio Build Tools 2022 以降（"C++ によるデスクトップ開発" ワークロードと Windows SDK）が必要です。
 
