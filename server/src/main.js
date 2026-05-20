@@ -8,6 +8,7 @@ const { WebSocketServer } = require('ws');
 const log           = require('./logger');
 const clients       = require('./clients');
 const udp           = require('./udp');
+const { readOggOpusFrames } = require('./ogg-reader');
 const UDP_PORT  = parseInt(process.env.UDP_PORT  || '4010');
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '4011');
 
@@ -32,43 +33,44 @@ setInterval(clients.cleanup, 30000);
 const mixer = new Worker(path.join(__dirname, 'mixer.js'));
 clients.setMixer(mixer);
 
-// ---- 仮想チャープクライアント（ミキサー以降の診断用 — Opusデコード段をバイパス）----
-const CHIRP_UUID      = 'chirp000';
-const CHIRP_FREQ_MIN  = 300;
-const CHIRP_FREQ_MAX  = 3000;
-const CHIRP_SWEEP_LEN = 48000 * 8;
-const CHIRP_AMPLITUDE = 12000;
-let chirpPhase = 0, chirpT = 0;
+// ---- 仮想BGMクライアント（再生テスト用）----
+// 音源: Bach "Goldberg Variations BWV 988 – Variation 1", perf. Shelley Katz
+// ライセンス: Public Domain (https://creativecommons.org/publicdomain/mark/1.0/)
+// 出典: musopen.org
+const BGM_UUID   = 'bgmtest0';
+const bgmFrames  = readOggOpusFrames(path.join(__dirname, '..', 'assets', 'goldberg-var1.opus'));
+log.info({ frames: bgmFrames.length }, 'bgm loaded');
 
-clients.touch(CHIRP_UUID);
-
-const CHIRP_START_NS = process.hrtime.bigint();
-const CHIRP_FRAME_NS = 20_000_000n;
-let   chirpFrameCount = 0;
-
-function sendChirpFrame() {
-    const pcm = new Int16Array(960);
-    for (let i = 0; i < 960; i++) {
-        const tMod = chirpT % CHIRP_SWEEP_LEN;
-        const freq = CHIRP_FREQ_MIN + (CHIRP_FREQ_MAX - CHIRP_FREQ_MIN) * tMod / CHIRP_SWEEP_LEN;
-        pcm[i] = Math.round(CHIRP_AMPLITUDE * Math.sin(chirpPhase));
-        chirpPhase += 2 * Math.PI * freq / 48000;
-        chirpT++;
-    }
-    chirpPhase %= 2 * Math.PI;
-
-    clients.touch(CHIRP_UUID);
-    clients.postRawPCM(CHIRP_UUID, Buffer.from(pcm.buffer));
-
-    chirpFrameCount++;
-    const targetNs = CHIRP_START_NS + BigInt(chirpFrameCount) * CHIRP_FRAME_NS;
-    const nowNs    = process.hrtime.bigint();
-    const delayMs  = Number(targetNs - nowNs) / 1_000_000;
-    setTimeout(sendChirpFrame, delayMs > 0.5 ? delayMs : 0);
+clients.touch(BGM_UUID);
+// デフォルト名が未設定の場合のみ設定（ユーザーがWebUIで変更した名前を上書きしない）
+const _bgmEntry = clients.get(BGM_UUID);
+if (_bgmEntry && !_bgmEntry.friendly_name) {
+    clients.update(BGM_UUID, { friendly_name: 'Test BGM (Goldberg Var.1)' });
 }
 
-setTimeout(sendChirpFrame, 20);
-// ---- 仮想チャープクライアントここまで ----
+const BGM_START_NS = process.hrtime.bigint();
+const BGM_FRAME_NS = 20_000_000n;
+let   bgmFrameCount = 0;
+let   bgmFrameIndex = 0;
+let   bgmRtpTs      = 0;
+
+function sendBgmFrame() {
+    const marker = bgmFrameIndex === 0; // 先頭（ループ折り返し含む）でデコーダリセット
+    clients.touch(BGM_UUID);
+    clients.setLastFrame(BGM_UUID, bgmFrames[bgmFrameIndex], marker, bgmRtpTs);
+
+    bgmRtpTs      = (bgmRtpTs + 960) >>> 0;
+    bgmFrameIndex = (bgmFrameIndex + 1) % bgmFrames.length;
+
+    bgmFrameCount++;
+    const targetNs = BGM_START_NS + BigInt(bgmFrameCount) * BGM_FRAME_NS;
+    const nowNs    = process.hrtime.bigint();
+    const delayMs  = Number(targetNs - nowNs) / 1_000_000;
+    setTimeout(sendBgmFrame, delayMs > 0.5 ? delayMs : 0);
+}
+
+setTimeout(sendBgmFrame, 20);
+// ---- 仮想BGMクライアントここまで ----
 
 // ---- WebSocket ----
 const wss = new WebSocketServer({ noServer: true });

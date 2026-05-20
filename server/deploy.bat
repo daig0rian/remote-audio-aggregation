@@ -14,6 +14,9 @@ echo Deploying to %SERVER% ...
 %SCP% "%ROOT%src\mixer.js"      %SERVER%:%REMOTE%/src/mixer.js      || goto :err
 %SCP% "%ROOT%src\udp.js"        %SERVER%:%REMOTE%/src/udp.js        || goto :err
 %SCP% "%ROOT%src\clients.js"    %SERVER%:%REMOTE%/src/clients.js    || goto :err
+%SCP% "%ROOT%src\ogg-reader.js" %SERVER%:%REMOTE%/src/ogg-reader.js || goto :err
+%SSH% %SERVER% "mkdir -p %REMOTE%/assets"
+%SCP% "%ROOT%assets\goldberg-var1.opus" %SERVER%:%REMOTE%/assets/goldberg-var1.opus || goto :err
 %SSH% %SERVER% "mkdir -p %REMOTE%/bench"
 %SCP% "%ROOT%bench\load-test.js" %SERVER%:%REMOTE%/bench/load-test.js || goto :err
 %SCP% "%ROOT%public\index.html"             %SERVER%:%REMOTE%/public/index.html             || goto :err
