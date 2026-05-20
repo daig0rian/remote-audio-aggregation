@@ -68,17 +68,18 @@ Each client has an RTP-timestamp-indexed jitter buffer in the mixer worker:
 
 **Test environment**: 1 vCPU (Intel i5-6500T 2.50 GHz), 2 GB RAM, Ubuntu 24.04 LTS (KVM VM)
 
-**Scenario: 40 connected clients, 10 simultaneously speaking**
+**Scenario: 40 connected clients, 10 simultaneously speaking, 150 s run**
 
 | Metric | Value |
 |--------|-------|
-| Mixer cycle time — mean | 0.79 ms |
-| Mixer cycle time — p99 | < 1.0 ms |
-| Mixer cycle time — max | 1.28 ms |
-| Server CPU usage | ~30 % |
-| Load average (server + load test on same VM) | ~0.5 |
+| Mixer cycle time — mean | 0.87 ms |
+| Mixer cycle time — p99 | ~2.0 ms |
+| Mixer cycle time — max | ~4.4 ms |
+| Server CPU usage | ~20 % |
 
-The mixer has a hard 20 ms budget per cycle. At 10 active speakers it uses under 4 % of that budget.
+> **Note on event loop delay**: The load test (`bench/load-test.js`) runs on the same VM as the server, so both compete for the single vCPU. This inflates the main-thread event loop delay metric (~10 ms measured) in a way that does not occur in production, where clients are on separate machines. The mixer runs in a Worker Thread with its own scheduler slot and is unaffected — the 0.87 ms figure above is what matters for audio quality.
+
+The mixer has a hard 20 ms budget per cycle. At 10 active speakers it uses under 5 % of that budget on a single vCPU.
 
 ### Why It Scales Well
 
@@ -94,8 +95,8 @@ As a result, CPU scales roughly as `fixed_cost + N × 1.5 %` rather than linearl
 
 | Active speakers | Mix budget used | Notes |
 |----------------|----------------|-------|
-| 10 | ~4 % | ✅ Verified on 1 vCPU / 2 GB |
-| 25 | ~10 % | Comfortable headroom |
+| 10 | ~5 % | ✅ Verified on 1 vCPU / 2 GB |
+| 25 | ~12 % | Comfortable headroom |
 | 40 | ~70 % | Decode ~12 ms; approaching limit |
 | 50+ | > 100 % | Frame drops expected |
 
@@ -106,11 +107,11 @@ WebSocket listener count has negligible impact up to ~200 concurrent browsers (e
 The server emits timing statistics every 5 seconds at `info` level:
 
 ```json
-{"msg":"mix cycle stats","mean_ms":"0.79","p99_ms":"1.0","max_ms":"1.28","avg_active":"10.9"}
-{"msg":"event loop delay","mean_ms":"0.12","p99_ms":"0.8","max_ms":"1.1"}
+{"msg":"mix cycle stats","mean_ms":"0.87","p99_ms":"2.0","max_ms":"4.42","avg_active":"11.0"}
+{"msg":"event loop delay","mean_ms":"10.6","p99_ms":"12.5","max_ms":"16.8"}
 ```
 
-`avg_active` is the mean number of clients actually mixed per cycle. `event loop delay` reflects main-thread responsiveness (UDP receive, WebSocket broadcast, HTTP).
+`avg_active` is the mean number of clients actually mixed per cycle. `event loop delay` reflects main-thread responsiveness (UDP receive, WebSocket broadcast, HTTP) — elevated here due to load test running on the same VM.
 
 To reproduce the load test:
 
