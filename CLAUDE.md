@@ -1,7 +1,7 @@
 # Remote Audio Aggregation — ソリューション仕様概要
 
 作成日: 2026-05-14  
-最終更新: 2026-05-18
+最終更新: 2026-05-21
 
 ---
 
@@ -56,18 +56,19 @@
 | Phase 0A: Node.js音声PoC | ✅ 完了 | @evan/opus, Float32Array mix, Worker Thread timing 確認済み |
 | Phase 0B: WASAPI PoC | ✅ 完了 | IAgileObject 必須, GetMixFormat は別デバイスから取得, マスターボリューム独立を確認 |
 | Phase 1: サーバー音声コア | ✅ 完了 | UDP受信・Opusミックス・WebSocket配信・REST API・RTPジッターバッファ・ログ基盤 動作確認済み |
-| Phase 2: Win32クライアント | 🔶 進行中 | トレイUI・INI設定・.ico・音声パイプライン完成。インストーラー未着手 |
+| Phase 2: Win32クライアント | ✅ 完了 | トレイUI・INI設定・.ico・音声パイプライン完成。インストーラー不要（exe単体をGitHub Releasesから配布） |
 | Phase 3: サーバー管理WebUI | ✅ 完了 | クライアント一覧・音量・ミュート・削除・名前編集・3状態表示 動作確認済み |
 | クライアント無音帯域削減 | ✅ 完了 | DTX heartbeat ~5pps、Markerビット RFC 7587準拠、isSilence閾値修正 |
 | Phase 4: Zabbixモジュール | 🔲 未着手 | |
 
 ### 開発環境
 - **Windowsホスト**: 192.168.11.33（KVMホスト）
-- **サーバーVM**: 192.168.11.38（Ubuntu 24.04, Node.js v24.15.0, /opt/raa-server）
-- **デプロイ**: `server\deploy.bat` でSCP転送＋自動再起動
-- **サーバーログ**: `ssh 192.168.11.38 'tail -f /tmp/raa.log'`（JSON形式、pino）
-- **ログレベル切り替え**: 環境変数 `LOG_LEVEL=debug node src/main.js`（デフォルト: `info`）
-- **systemdサービスファイル**: `server/raa-server.service`（未インストール。移行時は下記手順で設定）
+- **サーバーVM**: 192.168.11.38（Ubuntu 24.04, Node.js v24 via nvm, ~/raa-server）
+- **開発中のデプロイ**: `server\deploy.bat` でSCP転送＋自動再起動（サービス経由）
+- **本番インストール**: `install.sh` ワンライナー（GitHub Releases から取得）
+- **サーバーログ**: `ssh 192.168.11.38 'journalctl --user -u raa-server -f'`（JSON形式、pino）
+- **ログレベル切り替え**: 環境変数 `LOG_LEVEL=debug`（デフォルト: `info`）
+- **systemdサービス**: `systemctl --user` で管理（`~/.config/systemd/user/raa-server.service`）
 
 ### Phase 0B で判明した重要事項（Win32クライアント実装時に必要）
 - `IActivateAudioInterfaceCompletionHandler` は `IAgileObject` も実装必須
@@ -86,14 +87,23 @@
 - **ブラウザバッファ**: `BUFFER_MS = 200`（`public/index.html`）
 - **ログ**: `pino`（`src/logger.js`）、`LOG_LEVEL` 環境変数で制御。`info`（デフォルト）/ `debug` / `warn`
 
-#### systemd 移行手順（未実施）
+#### systemd ユーザーサービス（実施済み）
+
+`install.sh` が `~/.config/systemd/user/raa-server.service` を自動生成・登録する。
+手動で操作する場合のコマンド:
+
 ```bash
-scp server/raa-server.service 192.168.11.38:/tmp/
-ssh 192.168.11.38 'sudo cp /tmp/raa-server.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable raa-server && sudo systemctl start raa-server'
-# 以後の再起動: systemctl restart raa-server
-# ログ監視: journalctl -u raa-server -f
+systemctl --user status raa-server
+systemctl --user restart raa-server
+journalctl --user -u raa-server -f
 ```
-移行後は `deploy.bat` の SSH 再起動コマンドを `systemctl restart raa-server` に変更すること。
+
+`deploy.bat` による開発デプロイ後の再起動も `systemctl --user restart raa-server` を使うこと。
+
+**設計上の重要事項（ユーザースコープ採用の理由）:**
+- Node.js は nvm でユーザースコープにインストールされているため、`sudo npm install` では nvm の node が見えない → ネイティブアドオン（`@evan/opus`）が別バージョンでビルドされ `NODE_MODULE_VERSION mismatch` でクラッシュする
+- `~/raa-server` + `systemctl --user` + `loginctl enable-linger` の構成で、ログイン不要のブート時起動を `sudo` なしで実現できる
+- `sudo` が必要なのは `apt-get`（ビルドツール導入）と `loginctl enable-linger`（初回のみ）の2回だけ
 
 ### サーバーデプロイの重要事項（SSH 経由）
 - **nvm は非インタラクティブシェルで初期化されない** → `bash -lc` も動作しない場合がある。node は絶対パスで指定すること:  
@@ -137,6 +147,26 @@ ssh 192.168.11.38 'sudo cp /tmp/raa-server.service /etc/systemd/system/ && sudo 
   WASAPI が自動的にステレオ→モノラルのダウンミックスを行う。アプリ側で L+R 平均を取る処理は不要。
 - Opus エンコーダも `opus_encoder_create(48000, 1, ...)` に合わせること（チャンネル数の不整合はクラッシュする）。
 - サーバー側 `mixer.js` の `CHANNELS` も同じ値にすること。クライアントとサーバーで不一致があると無音になる。
+
+### リリースワークフロー（GitHub Actions）
+
+タグ `v*` を push すると `.github/workflows/release.yml` が自動実行される。
+
+```
+git tag v0.x.y && git push origin v0.x.y
+  ├─ server-pack (ubuntu-latest)
+  │    npm version $TAG  # package.json バージョンをタグに合わせる
+  │    npm pack          # raa-server-0.x.y.tgz を生成
+  │    → GitHub Release 作成 + raa-server-0.x.y.tgz / install.sh をアップロード
+  └─ client-build (windows-latest) ← server-pack 完了後に実行
+       build.bat         # libopus 自動ビルド → raa-client.exe
+       → 同リリースに raa-client.exe をアップロード
+```
+
+**注意点:**
+- `npm pack` はファイル名を `package.json` の `version` から取る → ワークフロー内で `npm version $TAG` を先に実行してタグと一致させる
+- `client-build` は `needs: server-pack` でリリースが先に作成されることを保証してから exe をアップロード
+- `install.sh` の `releases/latest/download/install.sh` URL は常に最新タグを指す
 
 ---
 
@@ -194,7 +224,7 @@ if (len > 2) send_packet(buf, len);  // 無音時はlen<=2なので送らない
 ```
 
 ### UX フロー
-1. インストーラーでインストール
+1. GitHub Releases から `raa-client.exe` をダウンロードして直接実行（インストーラー不要）
 2. 初回起動 → 設定ダイアログ自動表示
    - **サーバーIPアドレス** 入力欄
    - (詳細設定) サーバーポート（デフォルト: 5004）
@@ -271,7 +301,7 @@ a=fmtp:111 stereo=0
 | VM 名 | raa-server |
 | OS | Ubuntu 24.04.4 LTS（Noble Numbat） |
 | Kernel | 6.8.0-106-generic |
-| vCPU | 2（Intel i5-6500T 2.50GHz） |
+| vCPU | 1（Intel i5-6500T 2.50GHz） |
 | メモリ | 2 GB |
 | ディスク | 20 GB |
 | 自動起動 | 有効（virsh autostart raa-server） |
@@ -399,65 +429,37 @@ const opusData = buf.subarray(payloadStart);
 
 ### サーバーインストール手順
 
-**方針: 素のVM + nvm + systemd**
-Dockerは使わない。専用VMに1サービスだけ動かす構成ではDockerの隔離メリットが薄く、トラブルシューティング時にLinux管理者の共通言語であるsystemdをそのまま使えるほうが優先される。
+**方針: 素のVM + nvm + systemd --user**
+Dockerは使わない。専用VMに1サービスだけ動かす構成ではDockerの隔離メリットが薄い。
+Node.js は nvm でユーザースコープ管理し、systemd ユーザーサービスで起動する。
 
-#### 前提（Ubuntu 24.04 LTS 想定）
-```bash
-sudo apt-get update
-sudo apt-get install -y build-essential libopus-dev
-```
-`build-essential` と `libopus-dev` は `@evan/opus` のネイティブビルド用。
+#### 手順（Ubuntu 24.04 LTS）
 
-#### nvm + Node.js インストール
 ```bash
+# 1. nvm + Node.js 24
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
 source ~/.bashrc
 nvm install 24
-nvm use 24
-nvm alias default 24   # 再ログイン後も有効にする
+nvm alias default 24
+
+# 2. raa-server インストール（build-essential/libopus-dev の導入・サービス登録まで一括）
+curl -fsSL https://github.com/daig0rian/remote-audio-aggregation/releases/latest/download/install.sh | bash
 ```
 
-#### アプリ配置
-```bash
-sudo mkdir /opt/raa-server
-sudo chown $USER /opt/raa-server
-cd /opt/raa-server
-# リリース tarball を展開、または git clone
-npm ci                          # package-lock.json で再現性保証
-cp config.example.json config.json
-# config.json を編集（UDPポート、HTTPポート等）
-```
-
-#### systemd サービス登録
-```ini
-# /etc/systemd/system/raa-server.service
-[Unit]
-Description=Remote Audio Aggregation Server
-After=network.target
-
-[Service]
-ExecStart=/home/YOURUSER/.nvm/versions/node/v22.x.x/bin/node /opt/raa-server/src/main.js
-WorkingDirectory=/opt/raa-server
-Restart=always
-User=raa
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=multi-user.target
-```
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable raa-server
-sudo systemctl start raa-server
-```
+`install.sh` が行う処理:
+- Node.js ≥ 24 チェック（なければエラー終了）
+- `build-essential` / `libopus-dev` を apt で導入（未インストール時のみ、sudo）
+- `~/raa-server` にパッケージを展開
+- `npm install`（`@evan/opus` ネイティブアドオンのコンパイル）
+- `~/.config/systemd/user/raa-server.service` を生成・登録・起動
+- `loginctl enable-linger`（ブート時起動許可、sudo、初回のみ）
 
 #### 日常的なトラブルシューティング
 ```bash
-systemctl status raa-server          # 状態確認
-journalctl -u raa-server -f          # ライブログ
-journalctl -u raa-server --since "1 hour ago"  # 直近ログ
-systemctl restart raa-server         # 再起動
+systemctl --user status raa-server
+journalctl --user -u raa-server -f
+journalctl --user -u raa-server --since "1 hour ago"
+systemctl --user restart raa-server
 ```
 
 ### 長期メンテナンス（5〜10年運用）
@@ -473,22 +475,20 @@ VM (Ubuntu 24.04 LTS)       ← 2029年に次のLTSへ dist-upgrade
 
 #### 年次パッケージ更新（所要30分程度）
 ```bash
-cd /opt/raa-server
+cd ~/raa-server
 npm outdated              # 更新確認
 npm update                # マイナー・パッチ更新
-# 動作確認後
-git add package-lock.json && git commit -m "chore: annual npm update YYYY"
-systemctl restart raa-server
+systemctl --user restart raa-server
 ```
 
 #### Node.js メジャーバージョン更新（3年ごと）
 ```bash
-nvm install 24            # 新しいLTSをインストール
-nvm use 24
-npm rebuild               # @discordjs/opus をリビルド（または新プリビルドをDL）
-systemctl restart raa-server
-# 問題なければ
-nvm alias default 24
+nvm install 26            # 新しいLTSをインストール
+nvm alias default 26
+cd ~/raa-server
+npm rebuild               # @evan/opus をリビルド
+systemctl --user restart raa-server
+# install.sh を再実行するとサービスファイルの ExecStart パスも更新される
 ```
 
 ---
@@ -589,8 +589,9 @@ ws.onmessage = (e) => this._onFrame(e);  // _onFrame()はcbm-player.jsから流�
 - バッチスクリプト実行（音声開始/終了時）・自動起動設定（レジストリ）
 - シングルインスタンス制御（Mutex）・ログファイル
 
-**未着手:**
-- インストーラー
+**配布:**
+- インストーラー不要。GitHub Releases に `raa-client.exe` を置き、ダウンロードして直接実行。
+- タグ push（`v*`）で GitHub Actions が自動ビルド・リリースアセットとして添付。
 
 ### Phase 3: サーバー管理 WebUI
 **目的:** 音量・名前などの設定を管理画面から操作できるようにする  
