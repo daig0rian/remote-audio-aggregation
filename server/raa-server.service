@@ -1,13 +1,22 @@
+# systemd USER service for raa-server
+# This file is a reference template. install.sh generates the actual service
+# file at ~/.config/systemd/user/raa-server.service with correct absolute paths.
+#
+# To install manually:
+#   1. Copy to ~/.config/systemd/user/raa-server.service
+#   2. Replace ${HOME} and ${NODE_BIN} with actual paths
+#   3. systemctl --user daemon-reload && systemctl --user enable --now raa-server
+#   4. sudo loginctl enable-linger $USER   # boot startup without login
+
 [Unit]
 Description=Remote Audio Aggregation Server
 After=network.target
 
 [Service]
-ExecStart=/home/YOUR_USER/.nvm/versions/node/v24.x.x/bin/node /opt/raa-server/src/main.js
-WorkingDirectory=/opt/raa-server
+ExecStart=${NODE_BIN} ${HOME}/raa-server/src/main.js
+WorkingDirectory=${HOME}/raa-server
 Restart=always
 RestartSec=5
-User=YOUR_USER
 Environment=NODE_ENV=production
 Environment=LOG_LEVEL=info
 StandardOutput=journal
@@ -15,4 +24,4 @@ StandardError=journal
 SyslogIdentifier=raa-server
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

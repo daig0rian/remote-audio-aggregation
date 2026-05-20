@@ -169,14 +169,7 @@ remote-audio-aggregation/
 
 ## Server Setup (Ubuntu 24.04 LTS)
 
-### Prerequisites
-
-```bash
-sudo apt-get update
-sudo apt-get install -y build-essential libopus-dev
-```
-
-### Node.js via nvm
+### 1. Install Node.js via nvm
 
 ```bash
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
@@ -185,51 +178,41 @@ nvm install 24
 nvm alias default 24
 ```
 
-### Install
-
-**Recommended — one-liner with install.sh:**
+### 2. Install raa-server
 
 ```bash
 curl -fsSL https://github.com/daig0rian/remote-audio-aggregation/releases/latest/download/install.sh | bash
 ```
 
-The script checks for Node.js ≥ 24, installs `build-essential` and `libopus-dev` if missing, downloads the server package to `/opt/raa-server`, and runs `npm install` (which compiles the `@evan/opus` native addon).
+The script:
+- Checks for Node.js ≥ 24 (exits with an error if not found)
+- Installs `build-essential` and `libopus-dev` via apt if missing (requires sudo, once)
+- Downloads and extracts the server package to `~/raa-server`
+- Runs `npm install` as the current user (compiles the `@evan/opus` native addon)
+- Registers and starts a **systemd user service**
+- Runs `loginctl enable-linger` so the service starts at boot without login (requires sudo, once)
 
-**Alternative — from source:**
+### Service management
 
 ```bash
-sudo mkdir /opt/raa-server
-sudo chown $USER /opt/raa-server
-cp -r server/* /opt/raa-server/
-cd /opt/raa-server
-npm install --omit=dev
+systemctl --user status raa-server
+systemctl --user restart raa-server
+systemctl --user stop raa-server
+journalctl --user -u raa-server -f
+journalctl --user -u raa-server --since "1 hour ago"
 ```
 
-### Run (foreground)
+### Run in foreground (development)
 
 ```bash
+cd ~/raa-server
 node src/main.js
-# or with debug logging:
+# with debug logging:
 LOG_LEVEL=debug node src/main.js
 ```
 
 Default ports: UDP `4010` (audio input), HTTP/WS `4011` (web interface).
 Override with environment variables: `UDP_PORT=5004 HTTP_PORT=8080 node src/main.js`
-
-### Run as systemd service
-
-```bash
-sudo cp /opt/raa-server/raa-server.service /etc/systemd/system/
-# Edit ExecStart path to match your nvm node version if needed
-sudo systemctl daemon-reload
-sudo systemctl enable --now raa-server
-```
-
-```bash
-# Logs
-journalctl -u raa-server -f
-journalctl -u raa-server --since "1 hour ago"
-```
 
 ## Win32 Client
 

@@ -169,14 +169,7 @@ remote-audio-aggregation/
 
 ## サーバーセットアップ（Ubuntu 24.04 LTS）
 
-### 前提パッケージ
-
-```bash
-sudo apt-get update
-sudo apt-get install -y build-essential libopus-dev
-```
-
-### nvm で Node.js をインストール
+### 1. nvm で Node.js をインストール
 
 ```bash
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
@@ -185,29 +178,34 @@ nvm install 24
 nvm alias default 24
 ```
 
-### インストール
-
-**推奨 — install.sh ワンライナー:**
+### 2. raa-server をインストール
 
 ```bash
 curl -fsSL https://github.com/daig0rian/remote-audio-aggregation/releases/latest/download/install.sh | bash
 ```
 
-Node.js ≥ 24 を確認し、`build-essential` と `libopus-dev` が未インストールの場合は自動導入します。その後 `/opt/raa-server` にサーバーパッケージを展開し、`npm install`（`@evan/opus` ネイティブアドオンのコンパイルを含む）を実行します。
+スクリプトが行う処理:
+- Node.js ≥ 24 を確認（未インストールの場合はエラーで終了）
+- `build-essential` と `libopus-dev` が未インストールなら apt で導入（sudo、初回のみ）
+- サーバーパッケージを `~/raa-server` に展開
+- 現在のユーザーとして `npm install` を実行（`@evan/opus` ネイティブアドオンをコンパイル）
+- **systemd ユーザーサービス**を登録・起動
+- ログインなしでブート時から起動できるよう `loginctl enable-linger` を実行（sudo、初回のみ）
 
-**代替 — ソースから:**
+### サービス管理
 
 ```bash
-sudo mkdir /opt/raa-server
-sudo chown $USER /opt/raa-server
-cp -r server/* /opt/raa-server/
-cd /opt/raa-server
-npm install --omit=dev
+systemctl --user status raa-server
+systemctl --user restart raa-server
+systemctl --user stop raa-server
+journalctl --user -u raa-server -f
+journalctl --user -u raa-server --since "1 hour ago"
 ```
 
-### 起動（フォアグラウンド）
+### フォアグラウンド起動（開発・デバッグ用）
 
 ```bash
+cd ~/raa-server
 node src/main.js
 # デバッグログを有効にする場合:
 LOG_LEVEL=debug node src/main.js
@@ -215,21 +213,6 @@ LOG_LEVEL=debug node src/main.js
 
 デフォルトポート: UDP `4010`（音声入力）、HTTP/WS `4011`（Web インターフェース）。  
 環境変数で変更可能: `UDP_PORT=5004 HTTP_PORT=8080 node src/main.js`
-
-### systemd サービスとして起動
-
-```bash
-sudo cp /opt/raa-server/raa-server.service /etc/systemd/system/
-# ExecStart のパスを実際の nvm node バージョンに合わせて編集
-sudo systemctl daemon-reload
-sudo systemctl enable --now raa-server
-```
-
-```bash
-# ログ確認
-journalctl -u raa-server -f
-journalctl -u raa-server --since "1 hour ago"
-```
 
 ## Win32 クライアント
 
