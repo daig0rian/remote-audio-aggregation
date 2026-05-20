@@ -2,7 +2,7 @@
 
 [日本語版はこちら](README.ja.md)
 
-A low-latency audio aggregation system that captures system audio from multiple Windows PCs and streams the mixed audio to a browser via WebSocket. No SIP, no PBX — NAT traversal requires only two port forwards.
+A low-latency audio aggregation system that captures system audio from multiple Windows PCs and streams the mixed audio to a browser via WebSocket. No SIP, no PBX — NAT traversal requires only two port forwards.　
 
 <table>
   <tr>
@@ -146,7 +146,10 @@ remote-audio-aggregation/
     │   ├── udp.js           # RTP packet receiver and parser
     │   ├── clients.js       # Client registry, Opus decode, config persistence
     │   ├── mixer.js         # Worker thread: jitter buffer, PLC, mix, encode
+    │   ├── ogg-reader.js    # Minimal Ogg page parser (used by BGM client)
     │   └── logger.js        # pino instance shared across modules
+    ├── assets/
+    │   └── goldberg-var1.opus  # Built-in test audio (public domain, ~1 MB)
     ├── public/
     │   └── index.html       # Management WebUI + browser audio player
     ├── package.json
@@ -232,6 +235,13 @@ Open `http://<server>:4011/` in a browser.
 - Lists all active and known clients with friendly name, SSRC, and status
 - Per-client volume slider (0–200%), mute toggle, and name editor
 - Audio player for the mixed stream (click the play button)
+
+## Built-in Test Stream
+
+The server ships a virtual BGM client (`bgmtest0`) that loops a public-domain music clip from the moment the server starts. It appears in the WebUI as **"Test BGM (Goldberg Var.1)"** and allows you to verify end-to-end audio delivery — browser → WebSocket → decoder → playback — without needing any Win32 client connected.
+
+Audio: Bach *Goldberg Variations BWV 988 – Variation 1*, performed by Shelley Katz.  
+Source: [musopen.org](https://musopen.org/) · License: [Public Domain](https://creativecommons.org/publicdomain/mark/1.0/).
 
 ## RTP Packet Format
 

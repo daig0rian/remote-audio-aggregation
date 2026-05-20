@@ -105,6 +105,32 @@ ssh 192.168.11.38 'sudo cp /tmp/raa-server.service /etc/systemd/system/ && sudo 
 - **バックグラウンド起動は `& disown` で行う** → `nohup ... >> /tmp/raa.log 2>&1 & disown` の形が安定。
 - **`deploy.bat` 内の再起動コマンド** は上記を踏まえて絶対パスを使うこと（現状の `deploy.bat` は `node` を PATH 経由で呼んでいるため失敗することがある）。
 
+### 仮想BGMクライアント（再生テスト用）
+
+サーバー起動時から常時動作する内蔵の仮想クライアント。Win32 クライアントが1台もない状態でもブラウザやZabbixモジュールの再生テストができるようにするための機能。
+
+**音源ファイル**
+- `server/assets/goldberg-var1.opus`（Ogg Opus、48kHz モノラル 64kbps、1分54秒 / 約1MB）
+- Bach《ゴルトベルク変奏曲 BWV 988 – 第1変奏》、演奏: Shelley Katz
+- 出典: musopen.org、ライセンス: CC Public Domain Mark 1.0（商用利用・改変・再配布自由）
+
+**コード構成**
+- `server/src/ogg-reader.js`: 外部ライブラリ不使用のミニマルな Ogg ページパーサー。起動時に全フレームをメモリ上の `Buffer[]` として展開する
+- `server/src/main.js` 内の `sendBgmFrame()`: 20ms タイマーで1フレームずつ `clients.setLastFrame()` 経由でミキサーに送信
+
+**旧チャープとの違い**
+| 項目 | 旧チャープ（chirp000） | 新BGMクライアント（bgmtest0） |
+|------|----------------------|------------------------------|
+| 音源 | その場で生成するサイン波チャープ | 事前エンコード済み Opus フレーム |
+| 送信パス | `postRawPCM`（Opusデコード段バイパス） | `setLastFrame`（実クライアントと同一パス） |
+| 目的 | ミキサー以降の診断 | エンドツーエンド再生テスト |
+
+**設計上の注意点**
+- ループ折り返し時（`bgmFrameIndex === 0`）に `marker=true` を立てて mixer 側のデコーダリセットを発火させる。音声内容が不連続なため正しい動作。
+- WebUI フレンドリーネーム `"Test BGM (Goldberg Var.1)"` は起動時に `clients.update()` で書き込む。ただし config.json に名前が既に存在する場合（ユーザーがWebUIでリネーム済み）は上書きしない。
+- BGM クライアントは毎 20ms に `clients.touch()` を呼ぶため、cleanup による自動削除は発生しない。
+- Ogg Opus の先頭2ページ（OpusHead + OpusTags）はヘッダーなのでスキップする。ラッピング（255バイトセグメント連結）の再組立ても ogg-reader.js が処理する。
+
 ### Win32クライアント WASAPI チャンネル変換の重要事項
 - `AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY` フラグを指定すれば、  
   `WAVEFORMATEXTENSIBLE` で `nChannels=1` / `dwChannelMask=SPEAKER_FRONT_CENTER` を要求するだけで  

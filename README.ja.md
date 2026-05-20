@@ -146,7 +146,10 @@ remote-audio-aggregation/
     │   ├── udp.js           # RTP パケット受信・解析
     │   ├── clients.js       # クライアントレジストリ、Opus デコード、設定永続化
     │   ├── mixer.js         # Worker Thread: ジッターバッファ・PLC・混合・エンコード
+    │   ├── ogg-reader.js    # Ogg ページパーサー（BGM クライアント用）
     │   └── logger.js        # 各モジュール共有の pino インスタンス
+    ├── assets/
+    │   └── goldberg-var1.opus  # 内蔵テスト音源（パブリックドメイン、~1 MB）
     ├── public/
     │   └── index.html       # 管理 WebUI + ブラウザ音声プレイヤー
     ├── package.json
@@ -233,6 +236,13 @@ SSRC（管理 WebUI に表示されるクライアント識別子）は初回起
 - クライアントごとの音量スライダー（0〜200%）・ミュートトグル・名前編集
 - 混合ストリームの音声プレイヤー（再生ボタンをクリック）
 - 右上の EN/JA ボタンで表示言語を切り替え可能（ブラウザ言語を自動検出）
+
+## 内蔵テストストリーム
+
+サーバーには仮想 BGM クライアント（`bgmtest0`）が組み込まれており、起動直後からパブリックドメインの楽曲をループ再生します。WebUI には **"Test BGM (Goldberg Var.1)"** として表示されます。Win32 クライアントを接続しなくても、ブラウザ → WebSocket → デコーダ → 再生までのエンドツーエンドの疎通確認がすぐに行えます。
+
+音源: バッハ《ゴルトベルク変奏曲 BWV 988 – 第1変奏》、演奏: Shelley Katz  
+出典: [musopen.org](https://musopen.org/) · ライセンス: [パブリックドメイン](https://creativecommons.org/publicdomain/mark/1.0/)
 
 ## RTP パケットフォーマット
 
