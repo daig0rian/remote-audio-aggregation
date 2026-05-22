@@ -30,7 +30,7 @@
 |---|---|---|
 | [Win32 クライアント](client/) | ✅ 完成 | システムトレイアプリ、WASAPI プロセスループバックキャプチャ、RTP/UDP 送信 |
 | [Node.js サーバー](server/) | ✅ 完成 | UDP 受信、ミキサー Worker Thread、WebSocket ブロードキャスト、REST 管理 API |
-| Zabbix モジュール | 🔲 未着手 | ブラウザプレイヤーを組み込んだ Zabbix ダッシュボードウィジェット |
+| [Zabbix モジュール](module/) | ✅ 完成 | WebSocket 音声プレーヤーとミキサー設定リンクを持つ Zabbix ダッシュボードウィジェット |
 
 ## ダウンロード
 
@@ -41,6 +41,7 @@
 | `raa-client.exe` | Win32 クライアント — インストーラー不要、そのまま実行 |
 | `raa-server-x.y.z.tgz` | サーバー Node.js パッケージ |
 | `install.sh` | サーバーインストールスクリプト |
+| `raa_monitor-x.y.z.zip` | Zabbix ダッシュボードウィジェットモジュール |
 
 ## 動作の仕組み
 
@@ -151,6 +152,20 @@ remote-audio-aggregation/
 │   ├── get_opus.bat         # libopus のソースからのビルド
 │   ├── app.manifest         # Windows 10 以降互換マニフェスト
 │   └── raa-client.rc        # リソースファイル（アイコン、バージョン情報）
+├── module/                  # Zabbix ダッシュボードウィジェット
+│   ├── manifest.json
+│   ├── Widget.php
+│   ├── actions/WidgetView.php
+│   ├── includes/WidgetForm.php
+│   ├── views/
+│   │   ├── widget.edit.php
+│   │   └── widget.view.php
+│   └── assets/
+│       ├── css/widget.css
+│       └── js/
+│           ├── class.widget.js
+│           ├── raa-player.js
+│           └── opus-decoder.bundle.js
 └── server/                  # Node.js サーバー
     ├── src/
     │   ├── main.js          # エントリーポイント: UDP・HTTP・WS の接続
@@ -237,6 +252,40 @@ build.bat
 設定ファイルがない状態で初回起動すると、設定ダイアログが自動的に表示されます。サーバーの IP アドレスを入力して OK を押すと、即座に音声キャプチャと送信が始まります。
 
 SSRC（管理 WebUI に表示されるクライアント識別子）は初回起動時に生成され、`%APPDATA%\raa-client\raa-client.ini` に保存されます。
+
+## Zabbix モジュール
+
+`raa_monitor` Zabbix ウィジェットを使うと、Zabbix ダッシュボードから直接 RAA の音声ストリームを監視・試聴できます。
+
+### インストール
+
+1. [GitHub Releases](https://github.com/daig0rian/remote-audio-aggregation/releases) から `raa_monitor-x.y.z.zip` をダウンロードし、Zabbix のモジュールディレクトリに展開します:
+
+   ```bash
+   unzip raa_monitor-x.y.z.zip -d /usr/share/zabbix/modules/
+   ```
+
+2. Zabbix で **管理 → 一般 → モジュール → ディレクトリをスキャン** を実行し、*RAA Monitor* を **有効化** します。
+
+3. ダッシュボードに **RAA Monitor** ウィジェットを追加し、以下を設定します:
+
+   | 項目 | デフォルト | 説明 |
+   |------|-----------|------|
+   | RAA Server Host | `192.168.11.38` | RAA サーバーの IP またはホスト名（ブラウザから見えるアドレス） |
+   | WebSocket Port | `4011` | RAA サーバーの HTTP/WS ポート |
+   | Buffer (ms) | `200` | ジッターバッファサイズ |
+
+### ウィジェットのレイアウト
+
+```
+[ ▶ Monitor ]  [ Idle ]
+[════════════════════]   ← 音量メーター
+[ Mixer Settings ↗ ]    ← RAA サーバー管理画面を別タブで開く
+```
+
+- **▶ Monitor / ⏹ Stop** — WebSocket 音声ストリームのトグル
+- **音量メーター** — 混合済み Opus フレームサイズを反映（再生中に動作）
+- **Mixer Settings** — `http://<host>:<port>/` へのリンク（音量・ミュート・クライアント管理）
 
 ## 管理 WebUI
 

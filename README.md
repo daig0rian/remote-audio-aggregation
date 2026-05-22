@@ -30,7 +30,7 @@ A low-latency audio aggregation system that captures system audio from multiple 
 |-----------|--------|-------------|
 | [Win32 Client](client/) | ✅ Complete | System tray app, WASAPI process loopback capture, RTP/UDP sender |
 | [Node.js Server](server/) | ✅ Complete | UDP receiver, mixer worker thread, WebSocket broadcaster, REST management API |
-| Zabbix Module | 🔲 Not started | Zabbix dashboard widget wrapping the browser player |
+| [Zabbix Module](module/) | ✅ Complete | Zabbix dashboard widget with WebSocket audio player and Mixer Settings link |
 
 ## Download
 
@@ -41,6 +41,7 @@ Pre-built binaries are published to [GitHub Releases](https://github.com/daig0ri
 | `raa-client.exe` | Win32 client — download and run, no installer needed |
 | `raa-server-x.y.z.tgz` | Server Node.js package |
 | `install.sh` | Server install script |
+| `raa_monitor-x.y.z.zip` | Zabbix dashboard widget module |
 
 ## How It Works
 
@@ -151,6 +152,20 @@ remote-audio-aggregation/
 │   ├── get_opus.bat         # Downloads and builds libopus from source
 │   ├── app.manifest         # Windows 10+ compatibility manifest
 │   └── raa-client.rc        # Resource file (icons, version info)
+├── module/                  # Zabbix dashboard widget
+│   ├── manifest.json
+│   ├── Widget.php
+│   ├── actions/WidgetView.php
+│   ├── includes/WidgetForm.php
+│   ├── views/
+│   │   ├── widget.edit.php
+│   │   └── widget.view.php
+│   └── assets/
+│       ├── css/widget.css
+│       └── js/
+│           ├── class.widget.js
+│           ├── raa-player.js
+│           └── opus-decoder.bundle.js
 └── server/                  # Node.js server
     ├── src/
     │   ├── main.js          # Entry point: UDP + HTTP + WS wiring
@@ -237,6 +252,40 @@ build.bat
 On first run with no config file present, the settings dialog opens automatically. Enter the server IP address and click OK. The app then starts capturing and transmitting audio.
 
 The SSRC (client identifier shown in the management WebUI) is generated once and saved to `%APPDATA%\raa-client\raa-client.ini`.
+
+## Zabbix Module
+
+The `raa_monitor` Zabbix widget lets you monitor and listen to the RAA audio stream directly from a Zabbix dashboard — no separate browser tab needed.
+
+### Install
+
+1. Download `raa_monitor-x.y.z.zip` from [GitHub Releases](https://github.com/daig0rian/remote-audio-aggregation/releases) and unzip it into the Zabbix modules directory:
+
+   ```bash
+   unzip raa_monitor-x.y.z.zip -d /usr/share/zabbix/modules/
+   ```
+
+2. In Zabbix: **Administration → General → Modules → Scan directory**, then **Enable** the *RAA Monitor* module.
+
+3. Add the **RAA Monitor** widget to any dashboard and configure:
+
+   | Field | Default | Description |
+   |-------|---------|-------------|
+   | RAA Server Host | `192.168.11.38` | IP or hostname of the RAA server (as seen from the browser) |
+   | WebSocket Port | `4011` | HTTP/WS port of the RAA server |
+   | Buffer (ms) | `200` | Jitter buffer size |
+
+### Widget layout
+
+```
+[ ▶ Monitor ]  [ Idle ]
+[════════════════════]   ← volume meter
+[ Mixer Settings ↗ ]    ← opens RAA server WebUI in a new tab
+```
+
+- **▶ Monitor / ⏹ Stop** — toggles the WebSocket audio stream
+- **Volume meter** — reflects the mixed Opus frame size (active when audio is playing)
+- **Mixer Settings** — links to `http://<host>:<port>/` for volume, mute, and client management
 
 ## Management WebUI
 

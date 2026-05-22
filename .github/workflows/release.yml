@@ -31,6 +31,28 @@ jobs:
             server/install.sh
           generate_release_notes: true
 
+  module-pack:
+    needs: server-pack
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pack module zip
+        id: pack
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          cp -r module raa_monitor
+          zip -r raa_monitor-${VERSION}.zip raa_monitor
+          echo "zipfile=raa_monitor-${VERSION}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Upload module to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.pack.outputs.zipfile }}
+
   client-build:
     needs: server-pack
     runs-on: windows-latest

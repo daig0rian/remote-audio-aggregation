@@ -59,12 +59,14 @@
 | Phase 2: Win32クライアント | ✅ 完了 | トレイUI・INI設定・.ico・音声パイプライン完成。インストーラー不要（exe単体をGitHub Releasesから配布）。Classic Loopback フォールバック実装済み |
 | Phase 3: サーバー管理WebUI | ✅ 完了 | クライアント一覧・音量・ミュート・削除・名前編集・3状態表示 動作確認済み |
 | クライアント無音帯域削減 | ✅ 完了 | DTX heartbeat ~5pps、Markerビット RFC 7587準拠、isSilence閾値修正 |
-| Phase 4: Zabbixモジュール | 🔲 未着手 | |
+| Phase 4: Zabbixモジュール | ✅ 完了 | ARI不要のシンプル構成。単一トグルボタン・メーターバー・Mixer Settingsリンク。動作確認済み |
 
 ### 開発環境
 - **Windowsホスト**: 192.168.11.33（KVMホスト）
 - **サーバーVM**: 192.168.11.38（Ubuntu 24.04, Node.js v24 via nvm, ~/raa-server）
+- **ZabbixVM**: 192.168.11.34（`virsh -c qemu:///system start zabbix70` で起動）
 - **開発中のデプロイ**: `server\deploy.bat` でSCP転送＋自動再起動（サービス経由）
+- **Zabbixモジュールデプロイ**: `scp -r module/. root@192.168.11.34:/usr/share/zabbix/modules/raa_monitor/`
 - **本番インストール**: `install.sh` ワンライナー（GitHub Releases から取得）
 - **サーバーログ**: `ssh 192.168.11.38 'journalctl --user -u raa-server -f'`（JSON形式、pino）
 - **ログレベル切り替え**: 環境変数 `LOG_LEVEL=debug`（デフォルト: `info`）
@@ -605,10 +607,23 @@ ws.onmessage = (e) => this._onFrame(e);  // _onFrame()はcbm-player.jsから流�
 - 音量スライダー（0〜200%）・ミュートトグル・フレンドリーネーム編集
 - REST API の完成
 
-### Phase 4: Zabbix モジュール
+### Phase 4: Zabbix モジュール ✅
 **目的:** Phase 1 の簡易 HTML ページを Zabbix ダッシュボードパネルに格上げする  
-**完了の定義:** Zabbix ダッシュボードの再生ボタンで音声が流れる
+**完了の定義:** Zabbix ダッシュボードの再生ボタンで音声が流れる  
+**結果:** Zabbix ダッシュボードウィジェットとして動作確認済み。
 
-- `raa-player.js` の完成版
-- PHP スキャフォールド（Widget.php・WidgetForm.php 等）
-- ConfBridgeMonitor のモジュール構造を改修ベースとして使用
+**実装済み:**
+- `raa-player.js`: WebSocket `/stream` に直接接続するシンプルなプレーヤー（ARI・PHPプロキシ不要）
+- PHP スキャフォールド（Widget.php・WidgetForm.php 等）、ConfBridgeMonitor の構造を改修ベースに使用
+- 単一トグルボタン（▶ Monitor / ⏹ Stop）・ステータステキスト・音量メーターバー・Mixer Settingsリンク
+- `opus-decoder.bundle.js` は ConfBridgeMonitor から流用
+
+**ウィジェット設定項目:** RAA Server Host / WebSocket Port（デフォルト: 4011）/ Buffer ms（デフォルト: 200）
+
+**インストール手順:**
+1. `module/` ディレクトリを `/usr/share/zabbix/modules/raa_monitor/` に配置
+2. Zabbix → Administration → General → Modules → Scan directory → Enable
+
+**CBM との主な違い:**
+- ARI接続・StasisStart待機・PHPプロキシがすべて不要（WebSocket直接接続）
+- 2ボタン（Listen/Stop）→ 1ボタントグル（サーバーWebUIと同じ操作感）

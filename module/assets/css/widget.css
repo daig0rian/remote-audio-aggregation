@@ -1,0 +1,91 @@
+.raa-player {
+	display: flex;
+	align-items: center;
+	height: 100%;
+	box-sizing: border-box;
+	padding: 6px 12px;
+}
+
+/* Outer column: top-row / meter / link stacked vertically */
+.raa-controls {
+	display: flex;
+	flex-direction: column;
+	gap: 9px;
+	width: 100%;
+}
+
+/* Row 1: button + status side by side */
+.raa-row-top {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+/* Play/Stop toggle button — matches server WebUI green/red style */
+.raa-play-btn.btn {
+	padding: 0.3em 1em;
+	font-size: 0.85em;
+	border: 1px solid #4caf50 !important;
+	color: #4caf50 !important;
+	background: transparent !important;
+	border-radius: 5px !important;
+	white-space: nowrap;
+	box-shadow: none !important;
+	flex-shrink: 0;
+}
+
+.raa-play-btn.btn:hover,
+.raa-play-btn.btn:focus {
+	background: #4caf50 !important;
+	color: #000 !important;
+	border-color: #4caf50 !important;
+}
+
+.raa-play-btn.btn.playing {
+	border-color: #e74c3c !important;
+	color: #e74c3c !important;
+}
+
+.raa-play-btn.btn.playing:hover,
+.raa-play-btn.btn.playing:focus {
+	background: #e74c3c !important;
+	color: #fff !important;
+	border-color: #e74c3c !important;
+}
+
+/* Status label */
+.raa-status {
+	font-size: 0.8em;
+	color: #999;
+	white-space: nowrap;
+}
+
+/* Row 2: meter bar */
+.raa-meter {
+	width: 100%;
+	height: 6px;
+	background: #2a2a3a;
+	border-radius: 3px;
+	overflow: hidden;
+}
+
+.raa-bar {
+	height: 100%;
+	width: 0;
+	background: #4caf50;
+	transition: width 80ms;
+}
+
+/* Row 3: Mixer Settings link */
+.raa-admin-link {
+	font-size: 0.75em;
+	color: #4caf50;
+	text-decoration: none;
+	opacity: 0.75;
+	line-height: 1;
+}
+
+.raa-admin-link:hover {
+	opacity: 1;
+	text-decoration: underline;
+}
