@@ -70,6 +70,15 @@ mkdir -p "$INSTALL_DIR"
 # npm pack puts files under package/ — strip that prefix
 tar -xzf "$TMP/raa-server.tgz" -C "$INSTALL_DIR" --strip-components=1
 
+# ── Download raa-client.exe (for WebUI distribution on closed LAN) ────────────
+CLIENT_URL="https://github.com/${REPO}/releases/download/v${VERSION}/raa-client.exe"
+echo "==> Downloading raa-client.exe ..."
+if curl -fsSL "$CLIENT_URL" -o "$INSTALL_DIR/public/raa-client.exe"; then
+    echo "    → $INSTALL_DIR/public/raa-client.exe"
+else
+    echo "WARN: raa-client.exe download failed — client download will not be available in WebUI"
+fi
+
 # ── npm install (builds @evan/opus native addon) ───────────────────────────────
 echo "==> Running npm install (building @evan/opus — may take a minute)..."
 cd "$INSTALL_DIR"

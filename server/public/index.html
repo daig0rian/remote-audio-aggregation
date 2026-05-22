@@ -76,6 +76,11 @@ h1 { font-size: 1.3em; font-weight: 600; color: #fff; }
 /* Empty */
 .empty { color: #555; font-style: italic; font-size: 0.9em; }
 
+/* Download bar */
+.download-bar { margin-bottom: 1.2em; font-size: 0.82em; color: #888; }
+.download-bar a { color: #4a8aff; text-decoration: none; }
+.download-bar a:hover { text-decoration: underline; }
+
 /* ---- Client list: row layout ---- */
 .client-list { display: flex; flex-direction: column; gap: 0.4em; }
 
@@ -131,6 +136,8 @@ h1 { font-size: 1.3em; font-weight: 600; color: #fff; }
   <div id="meter"><div id="bar"></div></div>
 </div>
 
+<p class="download-bar"><a href="/raa-client.exe" download id="dl-client-link"></a></p>
+
 <div class="client-list" id="client-list"></div>
 
 <script src="/opus-decoder.bundle.js" charset="UTF-8"></script>
@@ -163,6 +170,7 @@ const TRANSLATIONS = {
     nameTitle:    'クリックして名前を編集',
     deleteTitle:  '削除',
     confirmDelete: uuid => `クライアント ${uuid} を削除しますか？`,
+    dlClient: '⬇ raa-client.exe をダウンロード',
   },
   en: {
     htmlLang:       'en',
@@ -190,6 +198,7 @@ const TRANSLATIONS = {
     nameTitle:    'Click to edit name',
     deleteTitle:  'Delete',
     confirmDelete: uuid => `Delete client ${uuid}?`,
+    dlClient: '⬇ Download raa-client.exe',
   },
 };
 
@@ -205,6 +214,7 @@ function applyLang() {
   document.getElementById('subtitle').textContent    = T.subtitle;
   document.getElementById('play-btn').textContent    = playing ? T.stopBtn : T.playBtn;
   if (!playing) document.getElementById('ws-status').textContent = T.wsIdle;
+  document.getElementById('dl-client-link').textContent = T.dlClient;
 }
 
 document.getElementById('lang-toggle').addEventListener('click', () => {

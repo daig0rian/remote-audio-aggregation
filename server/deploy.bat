@@ -21,6 +21,11 @@ echo Deploying to %SERVER% ...
 %SCP% "%ROOT%bench\load-test.js" %SERVER%:%REMOTE%/bench/load-test.js || goto :err
 %SCP% "%ROOT%public\index.html"             %SERVER%:%REMOTE%/public/index.html             || goto :err
 %SCP% "%ROOT%public\opus-decoder.bundle.js" %SERVER%:%REMOTE%/public/opus-decoder.bundle.js || goto :err
+if exist "%ROOT%..\client\raa-client.exe" (
+    %SCP% "%ROOT%..\client\raa-client.exe" %SERVER%:%REMOTE%/public/raa-client.exe || goto :err
+) else (
+    echo WARN: client\raa-client.exe not found, skipping client deploy
+)
 
 echo Restarting raa-server ...
 %SSH% %SERVER% "systemctl --user restart raa-server && echo started"
