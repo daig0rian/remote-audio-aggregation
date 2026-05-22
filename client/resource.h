@@ -32,6 +32,9 @@
 // Audio page controls
 #define IDC_BITRATE             3010
 #define IDC_BITRATE_SPIN        3011
+#define IDC_LOOPBACK_PROCESS    3012   // Radio: Process Loopback (build >= 19041)
+#define IDC_LOOPBACK_CLASSIC    3013   // Radio: Classic Loopback (master-volume dependent)
+#define IDC_LOOPBACK_NOTE       3014   // Static text: build requirement note
 
 // Detection page controls
 #define IDC_SILENCE_GUARD       3022

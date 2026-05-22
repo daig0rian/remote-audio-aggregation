@@ -33,6 +33,11 @@ BEGIN
     LTEXT           "Bitrate (kbps):", -1,          14,  22, 70, 9
     EDITTEXT        IDC_BITRATE,                    90,  20, 40, 13, ES_AUTOHSCROLL | ES_NUMBER
     CONTROL         "", IDC_BITRATE_SPIN, "msctls_updown32", 0x50000026, 130, 20, 11, 13
+
+    GROUPBOX        "Capture API", -1,               7,  55, 200, 82
+    AUTORADIOBUTTON "", IDC_LOOPBACK_PROCESS,        14,  69, 186, 10, WS_GROUP
+    AUTORADIOBUTTON "", IDC_LOOPBACK_CLASSIC,        14,  83, 186, 10
+    LTEXT           "", IDC_LOOPBACK_NOTE,           14,  97, 186, 16
 END
 
 // ---------- Detection page ----------

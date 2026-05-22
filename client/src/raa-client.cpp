@@ -106,6 +106,9 @@ struct Strings {
     const wchar_t* tab_batch;
     const wchar_t* tab_general;
     const wchar_t* file_filter;
+    const wchar_t* loopback_process;
+    const wchar_t* loopback_classic;
+    const wchar_t* loopback_note;
 };
 
 static const Strings STR_JA = {
@@ -127,6 +130,9 @@ static const Strings STR_JA = {
     L"バッチ",
     L"全般",
     L"スクリプト (*.bat;*.cmd;*.exe;*.ps1)\0*.bat;*.cmd;*.exe;*.ps1\0すべて (*.*)\0*.*\0",
+    L"ボリューム/ミュートの影響を受けない方式 *",
+    L"ボリューム/ミュートの影響を受ける方式",
+    L"* Windows 10 ビルド 19041 (2004) 以降が必要",
 };
 
 static const Strings STR_EN = {
@@ -148,6 +154,9 @@ static const Strings STR_EN = {
     L"Batch",
     L"General",
     L"Scripts (*.bat;*.cmd;*.exe;*.ps1)\0*.bat;*.cmd;*.exe;*.ps1\0All files (*.*)\0*.*\0",
+    L"Independent of master volume *",
+    L"Affected by master volume",
+    L"* Requires Windows 10 build 19041 (2004) or later",
 };
 
 static const Strings* S = &STR_JA;
@@ -166,6 +175,7 @@ struct Config {
     wchar_t batch_stop[MAX_PATH];
     int     batch_timeout_ms;
     BOOL    autostart;
+    int     loopback_mode;  // 0 = Process Loopback (build >= 19041), 1 = Classic Loopback
 };
 
 static Config g_cfg = {
@@ -173,11 +183,26 @@ static Config g_cfg = {
     64,
     200, 100,
     L"", L"", 5000,
-    FALSE
+    FALSE,
+    0   // loopback_mode: 0 = Process Loopback
 };
 
 static uint32_t g_ssrc = 0;
 static HWND     g_hwnd = NULL;
+
+static DWORD g_os_build = 0;
+static BOOL  g_process_loopback_supported = FALSE;
+
+static DWORD get_os_build(void) {
+    OSVERSIONINFOW ovi = { sizeof(ovi) };
+    typedef LONG (WINAPI *Fn)(OSVERSIONINFOW*);
+    HMODULE h = GetModuleHandleW(L"ntdll.dll");
+    if (h) {
+        auto fn = (Fn)GetProcAddress(h, "RtlGetVersion");
+        if (fn) { fn(&ovi); return ovi.dwBuildNumber; }
+    }
+    return 0;
+}
 
 // ============================================================
 // SSRC persistence
@@ -202,6 +227,8 @@ static void save_config(void) {
 
     swprintf_s(buf, 32, L"%d", g_cfg.bitrate_kbps);
     WritePrivateProfileStringW(L"Audio", L"bitrate_kbps",     buf,              g_ini_path);
+    swprintf_s(buf, 32, L"%d", g_cfg.loopback_mode);
+    WritePrivateProfileStringW(L"Audio", L"loopback_mode",    buf,              g_ini_path);
 
     swprintf_s(buf, 32, L"%d", g_cfg.silence_guard_ms);
     WritePrivateProfileStringW(L"Detection", L"silence_guard_ms", buf,          g_ini_path);
@@ -230,6 +257,7 @@ static BOOL load_config(void) {
     if (ssrc_hex[0]) g_ssrc = wcstoul(ssrc_hex, NULL, 16);
 
     g_cfg.bitrate_kbps     = (int)GetPrivateProfileIntW(L"Audio", L"bitrate_kbps", 64, g_ini_path);
+    g_cfg.loopback_mode    = (int)GetPrivateProfileIntW(L"Audio", L"loopback_mode", 0, g_ini_path);
 
     g_cfg.silence_guard_ms = (int)GetPrivateProfileIntW(L"Detection", L"silence_guard_ms", 200, g_ini_path);
     g_cfg.audio_guard_ms   = (int)GetPrivateProfileIntW(L"Detection", L"audio_guard_ms",   100, g_ini_path);
@@ -454,57 +482,98 @@ struct ThreadConfig {
     wchar_t batch_start[MAX_PATH];
     wchar_t batch_stop[MAX_PATH];
     int     batch_timeout_ms;
+    BOOL    use_process_loopback;
 };
 
 static DWORD WINAPI audio_thread_proc(LPVOID param) {
     ThreadConfig* tc = (ThreadConfig*)param;
     InterlockedExchange(&g_thread_running, 1);
 
-    HRESULT hr = RoInitialize(RO_INIT_MULTITHREADED);
-    if (FAILED(hr)) {
-        logf("RoInitialize failed: 0x%08lX", hr);
-        PostMessage(g_hwnd, WM_AUDIO_STATE, AS_ERROR, 0);
-        InterlockedExchange(&g_thread_running, 0);
-        delete tc; return 1;
-    }
-
-    // UDP socket
+    // UDP socket (common to both loopback paths)
     SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock == INVALID_SOCKET) {
         logf("socket() failed"); PostMessage(g_hwnd, WM_AUDIO_STATE, AS_ERROR, 0);
-        RoUninitialize(); InterlockedExchange(&g_thread_running, 0); delete tc; return 1;
+        InterlockedExchange(&g_thread_running, 0); delete tc; return 1;
     }
     sockaddr_in srv = {};
     srv.sin_family = AF_INET; srv.sin_port = htons((u_short)tc->server_port);
     inet_pton(AF_INET, tc->server_ip, &srv.sin_addr);
 
-    // WASAPI activation
-    AUDIOCLIENT_ACTIVATION_PARAMS params = {};
-    params.ActivationType = AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK;
-    params.ProcessLoopbackParams.TargetProcessId  = GetCurrentProcessId();
-    params.ProcessLoopbackParams.ProcessLoopbackMode = PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE;
-    PROPVARIANT pv = {}; PropVariantInit(&pv);
-    pv.vt = VT_BLOB; pv.blob.cbSize = sizeof(params); pv.blob.pBlobData = (BYTE*)&params;
+    IAudioClient* ac = NULL;
+    bool use_ro = false;
 
-    ActivationHandler* handler = new ActivationHandler();
-    IActivateAudioInterfaceAsyncOperation* asyncOp = NULL;
-    hr = ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
-                                     __uuidof(IAudioClient), &pv, handler, &asyncOp);
-    if (FAILED(hr)) {
-        logf("ActivateAudioInterfaceAsync failed: 0x%08lX", hr);
-        PostMessage(g_hwnd, WM_AUDIO_STATE, AS_ERROR, 0);
-        handler->Release(); closesocket(sock); RoUninitialize();
-        InterlockedExchange(&g_thread_running, 0); delete tc; return 1;
+    if (tc->use_process_loopback) {
+        // ---- Process Loopback (Windows 10 build 19041+, master-volume independent) ----
+        HRESULT hr = RoInitialize(RO_INIT_MULTITHREADED);
+        if (FAILED(hr)) {
+            logf("RoInitialize failed: 0x%08lX", hr);
+            PostMessage(g_hwnd, WM_AUDIO_STATE, AS_ERROR, 0);
+            closesocket(sock); InterlockedExchange(&g_thread_running, 0); delete tc; return 1;
+        }
+        use_ro = true;
+
+        AUDIOCLIENT_ACTIVATION_PARAMS params = {};
+        params.ActivationType = AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK;
+        params.ProcessLoopbackParams.TargetProcessId  = GetCurrentProcessId();
+        params.ProcessLoopbackParams.ProcessLoopbackMode = PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE;
+        PROPVARIANT pv = {}; PropVariantInit(&pv);
+        pv.vt = VT_BLOB; pv.blob.cbSize = sizeof(params); pv.blob.pBlobData = (BYTE*)&params;
+
+        ActivationHandler* handler = new ActivationHandler();
+        IActivateAudioInterfaceAsyncOperation* asyncOp = NULL;
+        hr = ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
+                                         __uuidof(IAudioClient), &pv, handler, &asyncOp);
+        if (FAILED(hr)) {
+            logf("ActivateAudioInterfaceAsync failed: 0x%08lX", hr);
+            PostMessage(g_hwnd, WM_AUDIO_STATE, AS_ERROR, 0);
+            handler->Release(); closesocket(sock); RoUninitialize();
+            InterlockedExchange(&g_thread_running, 0); delete tc; return 1;
+        }
+        WaitForSingleObject(handler->m_event, 5000);
+        if (FAILED(handler->m_hr) || !handler->m_client) {
+            logf("Audio activation failed: 0x%08lX", handler->m_hr);
+            PostMessage(g_hwnd, WM_AUDIO_STATE, AS_ERROR, 0);
+            asyncOp->Release(); handler->Release(); closesocket(sock); RoUninitialize();
+            InterlockedExchange(&g_thread_running, 0); delete tc; return 1;
+        }
+        ac = handler->m_client; handler->m_client = NULL;
+        asyncOp->Release(); handler->Release();
+    } else {
+        // ---- Classic Loopback (all Windows 10 builds, affected by master volume) ----
+        HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+        if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) {
+            logf("CoInitializeEx failed: 0x%08lX", hr);
+            PostMessage(g_hwnd, WM_AUDIO_STATE, AS_ERROR, 0);
+            closesocket(sock); InterlockedExchange(&g_thread_running, 0); delete tc; return 1;
+        }
+
+        IMMDeviceEnumerator* pEnum = NULL;
+        hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
+                              __uuidof(IMMDeviceEnumerator), (void**)&pEnum);
+        if (FAILED(hr)) {
+            logf("CoCreateInstance(MMDeviceEnumerator) failed: 0x%08lX", hr);
+            PostMessage(g_hwnd, WM_AUDIO_STATE, AS_ERROR, 0);
+            CoUninitialize(); closesocket(sock);
+            InterlockedExchange(&g_thread_running, 0); delete tc; return 1;
+        }
+        IMMDevice* pDev = NULL;
+        hr = pEnum->GetDefaultAudioEndpoint(eRender, eConsole, &pDev);
+        pEnum->Release();
+        if (FAILED(hr)) {
+            logf("GetDefaultAudioEndpoint failed: 0x%08lX", hr);
+            PostMessage(g_hwnd, WM_AUDIO_STATE, AS_ERROR, 0);
+            CoUninitialize(); closesocket(sock);
+            InterlockedExchange(&g_thread_running, 0); delete tc; return 1;
+        }
+        hr = pDev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void**)&ac);
+        pDev->Release();
+        if (FAILED(hr)) {
+            logf("IMMDevice::Activate failed: 0x%08lX", hr);
+            PostMessage(g_hwnd, WM_AUDIO_STATE, AS_ERROR, 0);
+            CoUninitialize(); closesocket(sock);
+            InterlockedExchange(&g_thread_running, 0); delete tc; return 1;
+        }
     }
-    WaitForSingleObject(handler->m_event, 5000);
-    if (FAILED(handler->m_hr) || !handler->m_client) {
-        logf("Audio activation failed: 0x%08lX", handler->m_hr);
-        PostMessage(g_hwnd, WM_AUDIO_STATE, AS_ERROR, 0);
-        asyncOp->Release(); handler->Release(); closesocket(sock); RoUninitialize();
-        InterlockedExchange(&g_thread_running, 0); delete tc; return 1;
-    }
-    IAudioClient* ac = handler->m_client; handler->m_client = NULL;
-    asyncOp->Release(); handler->Release();
 
     WAVEFORMATEXTENSIBLE wfex = {};
     wfex.Format.wFormatTag       = WAVE_FORMAT_EXTENSIBLE;
@@ -518,7 +587,7 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
     wfex.dwChannelMask           = SPEAKER_FRONT_CENTER;
     wfex.SubFormat               = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
 
-    hr = ac->Initialize(AUDCLNT_SHAREMODE_SHARED,
+    HRESULT hr = ac->Initialize(AUDCLNT_SHAREMODE_SHARED,
                         AUDCLNT_STREAMFLAGS_LOOPBACK |
                         AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
                         AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
@@ -526,7 +595,8 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
     if (FAILED(hr)) {
         logf("Initialize failed: 0x%08lX", hr);
         PostMessage(g_hwnd, WM_AUDIO_STATE, AS_ERROR, 0);
-        ac->Release(); closesocket(sock); RoUninitialize();
+        ac->Release(); closesocket(sock);
+        if (use_ro) RoUninitialize(); else CoUninitialize();
         InterlockedExchange(&g_thread_running, 0); delete tc; return 1;
     }
 
@@ -539,7 +609,9 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
     opus_encoder_ctl(enc, OPUS_SET_DTX(1));
 
     ac->Start();
-    logf("Audio started -> %s:%d  SSRC=%08x", tc->server_ip, tc->server_port, tc->ssrc);
+    logf("Audio started (%s) -> %s:%d  SSRC=%08x",
+         tc->use_process_loopback ? "ProcessLoopback" : "ClassicLoopback",
+         tc->server_ip, tc->server_port, tc->ssrc);
 
     const int FRAME_SAMPLES     = 960;   // 48000Hz × 20ms
     const int RTP_TS_PER_FRAME  = 960;   // RFC 7587: Opus RTP clock is 48kHz regardless of encoder rate
@@ -557,6 +629,7 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
     // 64 kbps (~160B); no valid Opus audio frame at any supported bitrate falls below 8B.
     static const int AUDIO_LEN_MIN = 8;
     int hb_counter = 0;
+    DWORD last_send_tick = GetTickCount();
 
     // DTX guard state (ms-based; frames are 20ms each)
     int silence_frames = tc->silence_guard_ms / 20;  // silent frames needed to trigger batch_stop
@@ -569,6 +642,19 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
     BYTE pkt_buf[12 + 4000];
 
     while (!InterlockedCompareExchange(&g_thread_stop, 0, 0)) {
+        // Wall-clock heartbeat fallback: if WASAPI stops delivering data (e.g. render engine
+        // semi-dormant after sleep/wake), send a silence packet to keep server status stable.
+        // Without this, hb_counter can't advance and the server flips between idle/disconnected.
+        if (GetTickCount() - last_send_tick > 800) {
+            float zeros[FRAME_SAMPLES] = {};
+            int len = opus_encode_float(enc, zeros, FRAME_SAMPLES, opus_buf, sizeof(opus_buf));
+            int plen = build_rtp(pkt_buf, ts48k, tc->ssrc, opus_buf, len, 0);
+            sendto(sock, (char*)pkt_buf, plen, 0, (sockaddr*)&srv, sizeof(srv));
+            ts48k += RTP_TS_PER_FRAME;
+            pcm_fill = 0; frame_has_audio = false; hb_counter = 0; was_silent = 1;
+            last_send_tick = GetTickCount();
+        }
+
         BYTE* pData; UINT32 nf; DWORD flags;
         hr = cap->GetBuffer(&pData, &nf, &flags, NULL, NULL);
         if (hr == AUDCLNT_S_BUFFER_EMPTY || nf == 0) { Sleep(5); continue; }
@@ -589,8 +675,10 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
 
             if (pcm_fill == FRAME_SAMPLES) {
                 int len = opus_encode_float(enc, pcm, FRAME_SAMPLES, opus_buf, sizeof(opus_buf));
-                // DTX leak suppression: treat WASAPI-silent frames as silent regardless of Opus output
-                BOOL frame_silent = !frame_has_audio || (len <= 2);
+                // DTX leak suppression: treat WASAPI-silent frames as silent regardless of Opus output.
+                // Use AUDIO_LEN_MIN (same threshold as send logic) so CN frames (len≈3) are also
+                // treated as silence here, keeping the DTX guard consistent with the send path.
+                BOOL frame_silent = !frame_has_audio || (len <= AUDIO_LEN_MIN);
 
                 if (frame_silent) {
                     silent_count++; active_count = 0;
@@ -635,6 +723,7 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
                     sendto(sock, (char*)pkt_buf, plen, 0, (sockaddr*)&srv, sizeof(srv));
                     // Update was_silent based on what was actually sent, not on DTX guard state.
                     was_silent = is_audio ? 0 : 1;
+                    last_send_tick = GetTickCount();
                 }
                 ts48k += RTP_TS_PER_FRAME; pcm_fill = 0; frame_has_audio = false;
             }
@@ -648,7 +737,7 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
     opus_encoder_destroy(enc);
     cap->Release(); ac->Release();
     closesocket(sock);
-    RoUninitialize();
+    if (use_ro) RoUninitialize(); else CoUninitialize();
     InterlockedExchange(&g_thread_running, 0);
     delete tc;
     return 0;
@@ -667,7 +756,8 @@ static void start_audio_thread(void) {
     tc->audio_guard_ms   = g_cfg.audio_guard_ms;
     wcscpy_s(tc->batch_start, g_cfg.batch_start);
     wcscpy_s(tc->batch_stop,  g_cfg.batch_stop);
-    tc->batch_timeout_ms = g_cfg.batch_timeout_ms;
+    tc->batch_timeout_ms     = g_cfg.batch_timeout_ms;
+    tc->use_process_loopback = (g_cfg.loopback_mode == 0 && g_process_loopback_supported);
 
     if (g_audio_thread) { CloseHandle(g_audio_thread); g_audio_thread = NULL; }
     g_audio_thread = CreateThread(NULL, 0, audio_thread_proc, tc, 0, NULL);
@@ -687,6 +777,7 @@ static void stop_audio_thread(void) {
 
 static wchar_t s_tmp_ip[64];
 static int     s_tmp_port, s_tmp_bitrate, s_tmp_silence, s_tmp_audio, s_tmp_timeout;
+static int     s_tmp_loopback_mode;
 static wchar_t s_tmp_batch_start[MAX_PATH], s_tmp_batch_stop[MAX_PATH];
 static BOOL    s_tmp_autostart;
 
@@ -700,6 +791,7 @@ static void apply_settings(void) {
     wcscpy_s(g_cfg.batch_stop,  s_tmp_batch_stop);
     g_cfg.batch_timeout_ms    = s_tmp_timeout;
     g_cfg.autostart           = s_tmp_autostart;
+    g_cfg.loopback_mode       = s_tmp_loopback_mode;
 
     set_autostart(g_cfg.autostart);
     save_config();
@@ -751,6 +843,19 @@ static INT_PTR CALLBACK page_audio(HWND hdlg, UINT msg, WPARAM wp, LPARAM lp) {
         HWND spin = GetDlgItem(hdlg, IDC_BITRATE_SPIN);
         SendMessage(spin, UDM_SETRANGE, 0, MAKELPARAM(512, 6));
         SetDlgItemInt(hdlg, IDC_BITRATE, s_tmp_bitrate, FALSE);
+
+        // Set localized radio button and note text dynamically to avoid RC encoding issues
+        SetDlgItemTextW(hdlg, IDC_LOOPBACK_PROCESS, S->loopback_process);
+        SetDlgItemTextW(hdlg, IDC_LOOPBACK_CLASSIC, S->loopback_classic);
+        SetDlgItemTextW(hdlg, IDC_LOOPBACK_NOTE, S->loopback_note);
+
+        // Gray out Process Loopback radio on unsupported builds; force Classic
+        if (!g_process_loopback_supported) {
+            EnableWindow(GetDlgItem(hdlg, IDC_LOOPBACK_PROCESS), FALSE);
+            s_tmp_loopback_mode = 1;
+        }
+        CheckRadioButton(hdlg, IDC_LOOPBACK_PROCESS, IDC_LOOPBACK_CLASSIC,
+                         (s_tmp_loopback_mode == 0) ? IDC_LOOPBACK_PROCESS : IDC_LOOPBACK_CLASSIC);
         return TRUE;
     }
     case WM_NOTIFY: {
@@ -759,6 +864,8 @@ static INT_PTR CALLBACK page_audio(HWND hdlg, UINT msg, WPARAM wp, LPARAM lp) {
             s_tmp_bitrate = (int)GetDlgItemInt(hdlg, IDC_BITRATE, NULL, FALSE);
             if (s_tmp_bitrate < 6)   s_tmp_bitrate = 6;
             if (s_tmp_bitrate > 512) s_tmp_bitrate = 512;
+            s_tmp_loopback_mode =
+                (IsDlgButtonChecked(hdlg, IDC_LOOPBACK_PROCESS) == BST_CHECKED) ? 0 : 1;
         }
         break;
     }
@@ -842,6 +949,7 @@ static BOOL show_settings(HWND hwnd) {
     wcscpy_s(s_tmp_batch_stop,  g_cfg.batch_stop);
     s_tmp_timeout  = g_cfg.batch_timeout_ms;
     s_tmp_autostart = g_cfg.autostart;
+    s_tmp_loopback_mode = (g_cfg.loopback_mode == 0 && g_process_loopback_supported) ? 0 : 1;
 
     PROPSHEETPAGEW pages[5] = {};
     const wchar_t* titles[] = { S->tab_connection, S->tab_audio, S->tab_detection, S->tab_batch, S->tab_general };
@@ -937,6 +1045,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
 
     log_init();
     logf("raa-client starting");
+
+    g_os_build = get_os_build();
+    g_process_loopback_supported = (g_os_build >= 19041);
+    logf("OS build: %lu, ProcessLoopback: %s",
+         g_os_build, g_process_loopback_supported ? "yes" : "no");
 
     S = (PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_JAPANESE) ? &STR_JA : &STR_EN;
 

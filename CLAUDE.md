@@ -1,7 +1,7 @@
 # Remote Audio Aggregation — ソリューション仕様概要
 
 作成日: 2026-05-14  
-最終更新: 2026-05-21
+最終更新: 2026-05-22
 
 ---
 
@@ -56,7 +56,7 @@
 | Phase 0A: Node.js音声PoC | ✅ 完了 | @evan/opus, Float32Array mix, Worker Thread timing 確認済み |
 | Phase 0B: WASAPI PoC | ✅ 完了 | IAgileObject 必須, GetMixFormat は別デバイスから取得, マスターボリューム独立を確認 |
 | Phase 1: サーバー音声コア | ✅ 完了 | UDP受信・Opusミックス・WebSocket配信・REST API・RTPジッターバッファ・ログ基盤 動作確認済み |
-| Phase 2: Win32クライアント | ✅ 完了 | トレイUI・INI設定・.ico・音声パイプライン完成。インストーラー不要（exe単体をGitHub Releasesから配布） |
+| Phase 2: Win32クライアント | ✅ 完了 | トレイUI・INI設定・.ico・音声パイプライン完成。インストーラー不要（exe単体をGitHub Releasesから配布）。Classic Loopback フォールバック実装済み |
 | Phase 3: サーバー管理WebUI | ✅ 完了 | クライアント一覧・音量・ミュート・削除・名前編集・3状態表示 動作確認済み |
 | クライアント無音帯域削減 | ✅ 完了 | DTX heartbeat ~5pps、Markerビット RFC 7587準拠、isSilence閾値修正 |
 | Phase 4: Zabbixモジュール | 🔲 未着手 | |
@@ -74,7 +74,7 @@
 - `IActivateAudioInterfaceCompletionHandler` は `IAgileObject` も実装必須
 - `GetMixFormat()` はProcessLoopbackクライアントでは `E_NOTIMPL` → デフォルト出力デバイスから別途取得
 - アプリマニフェストに Windows 10 互換宣言（`{8e0f7a12-...}`）が必要
-- `RoInitialize(RO_INIT_MULTITHREADED)` を使うこと（CoInitializeEx ではなく）
+- `RoInitialize(RO_INIT_MULTITHREADED)` を使うこと（Process Loopback パス）。Classic Loopback パスは従来の `CoInitializeEx(NULL, COINIT_MULTITHREADED)` + `IMMDeviceEnumerator`。
 - MSVC: VS Build Tools 2026 v14.51 + Windows 11 SDK 10.0.26100.0
 - ビルドスクリプト: `poc\phase0b\build.bat`
 
@@ -206,7 +206,9 @@ git tag v0.x.y && git push origin v0.x.y
 ### 技術スタック
 - 言語: **C++ / Win32 API ネイティブ** (MSVC)
 - 音声キャプチャ: **WASAPI COM直接** (`IAudioClient` + `AUDCLNT_STREAMFLAGS_LOOPBACK`)
-  - Windows 10 2004以降: `AUDCLNT_STREAMFLAGS_PROCESS_LOOPBACK` でマスターボリューム非依存キャプチャ
+  - **Process Loopback**（デフォルト、ビルド 19041 以上）: `VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK` + `ActivateAudioInterfaceAsync` でマスターボリューム非依存キャプチャ。`RoInitialize(RO_INIT_MULTITHREADED)` 使用。
+  - **Classic Loopback**（フォールバック、全 Windows 10）: `IMMDeviceEnumerator::GetDefaultAudioEndpoint(eRender)` でデフォルト出力デバイスをキャプチャ。マスターボリュームの影響を受ける。`CoInitializeEx(COINIT_MULTITHREADED)` 使用。
+  - ビルド 19041 未満では Classic Loopback に自動切り替え。設定画面の「オーディオ」タブでユーザーが手動選択も可能（非対応ビルドでは Process Loopback ラジオをグレーアウト）。
   - 参照実装: `loopcast/client/LoopcastUA/src/Audio/ProcessLoopbackCapturer.cs`
 - コーデック: **libopus** (静的リンク、外部DLL不要)
   - DTX有効 (`OPUS_SET_DTX(1)`) → 無音時はパケット送信をスキップ（帯域99%削減）
@@ -274,7 +276,7 @@ a=fmtp:111 stereo=0
 
 ### 設定ファイル
 - `%APPDATA%\raa-client\raa-client.ini`（Windows INI API: `WritePrivateProfileString` / `GetPrivateProfileInt`）
-- セクション: `[Connection]` server_ip / server_port / ssrc、`[Audio]` bitrate_kbps、`[Detection]` silence_guard_ms / audio_guard_ms、`[Batch]` start_script / stop_script / timeout_ms、`[General]` autostart
+- セクション: `[Connection]` server_ip / server_port / ssrc、`[Audio]` bitrate_kbps / loopback_mode（0=Process/1=Classic）、`[Detection]` silence_guard_ms / audio_guard_ms、`[Batch]` start_script / stop_script / timeout_ms、`[General]` autostart
 - **初回起動フロー**: INI 未存在 → SSRC 生成 → 設定ダイアログ自動表示 → OK で INI 初回保存 → 音声スレッド開始。Cancel → アプリ終了。
 - SSRC は INI に保存。アンインストールしない限り変わらない。
 
@@ -583,9 +585,11 @@ ws.onmessage = (e) => this._onFrame(e);  // _onFrame()はcbm-player.jsから流�
 **完了の定義:** Windows PC で再生した音声が Phase 1 のブラウザページで聞こえる
 
 **実装済み:**
-- WASAPI Process Loopback（モノラル、48kHz、32bit float、自動ダウンミックス）
+- WASAPI Process Loopback（ビルド 19041+、マスターボリューム非依存）+ Classic Loopback フォールバック（全 Windows 10）
+- モノラル、48kHz、32bit float、`AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM` による自動ダウンミックス
 - libopus encode（64kbps、DTX）+ RTP/UDP 送信（RFC 3550 + RFC 7587）
 - システムトレイ（.ico 3状態）・5タブ設定ダイアログ・INI永続化・初回起動フロー
+- オーディオタブ: キャプチャ API 選択ラジオボタン（ビルド非対応時は Process Loopback をグレーアウト）
 - バッチスクリプト実行（音声開始/終了時）・自動起動設定（レジストリ）
 - シングルインスタンス制御（Mutex）・ログファイル
 

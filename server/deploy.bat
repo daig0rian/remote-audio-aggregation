@@ -1,7 +1,7 @@
 @echo off
 setlocal
 set SERVER=192.168.11.38
-set REMOTE=/opt/raa-server
+set REMOTE=/home/daigo/raa-server
 set NODE=/home/daigo/.nvm/versions/node/v24.15.0/bin/node
 set SCP="C:\Program Files\Git\usr\bin\scp.exe"
 set SSH="C:\Program Files\Git\usr\bin\ssh.exe"
@@ -23,7 +23,7 @@ echo Deploying to %SERVER% ...
 %SCP% "%ROOT%public\opus-decoder.bundle.js" %SERVER%:%REMOTE%/public/opus-decoder.bundle.js || goto :err
 
 echo Restarting raa-server ...
-%SSH% %SERVER% "kill $(ps aux | grep 'node src/main.js' | grep -v grep | awk '{print $2}') 2>/dev/null; sleep 1; cd %REMOTE% && nohup %NODE% src/main.js >> /tmp/raa.log 2>&1 & disown && echo started"
+%SSH% %SERVER% "systemctl --user restart raa-server && echo started"
 
 echo Done.
 goto :eof
