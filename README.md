@@ -8,6 +8,7 @@ A low-latency audio aggregation system that captures system audio from multiple 
   <tr>
     <td align="center"><b>Win32 Client</b><br><img src="docs/screenshot-client.png" alt="Win32 Client" width="380"></td>
     <td align="center"><b>Server WebUI</b><br><img src="docs/screenshot-webui-en.png" alt="Server WebUI" width="380"></td>
+    <td align="center"><b>Zabbix Module</b><br><img src="docs/screenshot-zabbix.png" alt="Zabbix Module" width="380"></td>
   </tr>
 </table>
 
@@ -15,13 +16,14 @@ A low-latency audio aggregation system that captures system audio from multiple 
 
 ```
 [Windows PC-A] ──UDP:4010──┐
-[Windows PC-B] ──UDP:4010──┤──→ [Linux Server] ──WebSocket:4011──→ [Browser]
-[Windows PC-C] ──UDP:4010──┘         │
-                                  WebUI :4011
+[Windows PC-B] ──UDP:4010──┤──→ [Linux Server] ──WebSocket:4011──→ [Browser / Zabbix]
+[Windows PC-C] ──UDP:4010──┘          │
+                                   WebUI :4011
 ```
 
-- **Clients → Server**: UDP one-way (fire & forget). No inbound connections required on the client side.
-- **Browser → Server**: WebSocket outbound connection. Works through NAT with just two port forwards (UDP 4010, TCP 4011).
+- **Clients → Server**: RTP (Opus) over UDP, fire & forget. Destination port: UDP 4010.
+- **Browser → Server**: HTTP + WebSocket (outbound only, works through NAT). Destination port: TCP 4011.
+- **Zabbix → Server**: WebSocket. Destination port: TCP 4011.
 - **Audio format**: Opus 48 kHz mono, 20 ms frames, 64 kbps, DTX enabled
 
 ## Components
@@ -29,7 +31,7 @@ A low-latency audio aggregation system that captures system audio from multiple 
 | Component | Status | Description |
 |-----------|--------|-------------|
 | [Win32 Client](client/) | ✅ Complete | System tray app, WASAPI process loopback capture, RTP/UDP sender |
-| [Node.js Server](server/) | ✅ Complete | UDP receiver, mixer worker thread, WebSocket broadcaster, REST management API |
+| [Node.js Server](server/) | ✅ Complete | UDP receiver, mixer worker thread, WebSocket audio stream, REST management API |
 | [Zabbix Module](module/) | ✅ Complete | Zabbix dashboard widget with WebSocket audio player and Mixer Settings link |
 
 ## Download
@@ -48,9 +50,9 @@ Pre-built binaries are published to [GitHub Releases](https://github.com/daig0ri
 ### Audio Pipeline (20 ms cycle)
 
 1. **Win32 client** captures system audio via WASAPI Process Loopback (master-volume-independent), encodes with libopus, and sends RTP packets over UDP.
-2. **Server UDP receiver** parses RTP headers, extracts the SSRC as client ID, decodes Opus → PCM, and enqueues frames into per-client RTP-timestamp-indexed jitter buffers.
-3. **Mixer worker thread** runs a precise 20 ms timer, pulls one frame per client from its jitter buffer (with PLC for missing frames), mixes PCM with per-client volume scaling, re-encodes as Opus, and sends to the main thread.
-4. **Main thread** broadcasts the encoded frame to all WebSocket listeners.
+2. **Server UDP receiver** parses RTP headers, extracts SSRC, RTP timestamp, and marker bit, detects stream gaps (marker bit or >300 ms silence), and forwards the raw Opus payload to the mixer worker thread.
+3. **Mixer worker thread** decodes each incoming Opus frame to PCM and enqueues it into the per-client RTP-timestamp-indexed jitter buffer. A precise 20 ms timer then pulls one frame per client (with PLC for missing frames), applies per-client volume scaling, mixes the PCM streams, re-encodes as Opus, and sends the result to the main thread.
+4. **Main thread** sends the encoded frame to each connected WebSocket listener.
 5. **Browser** decodes Opus via WebAssembly and schedules playback through the Web Audio API.
 
 ### Jitter Buffer
@@ -112,7 +114,7 @@ The server emits timing statistics every 5 seconds at `info` level:
 {"msg":"event loop delay","mean_ms":"10.6","p99_ms":"12.5","max_ms":"16.8"}
 ```
 
-`avg_active` is the mean number of clients actually mixed per cycle. `event loop delay` reflects main-thread responsiveness (UDP receive, WebSocket broadcast, HTTP) — elevated here due to load test running on the same VM.
+`avg_active` is the mean number of clients actually mixed per cycle. `event loop delay` reflects main-thread responsiveness (UDP receive, WebSocket send, HTTP) — elevated here due to load test running on the same VM.
 
 To reproduce the load test:
 
@@ -271,7 +273,7 @@ The `raa_monitor` Zabbix widget lets you monitor and listen to the RAA audio str
 
    | Field | Default | Description |
    |-------|---------|-------------|
-   | RAA Server Host | `192.168.11.38` | IP or hostname of the RAA server (as seen from the browser) |
+   | RAA Server Host | `10.0.0.1` | IP or hostname of the RAA server (as seen from the browser) |
    | WebSocket Port | `4011` | HTTP/WS port of the RAA server |
    | Buffer (ms) | `200` | Jitter buffer size |
 
@@ -294,6 +296,7 @@ Open `http://<server>:4011/` in a browser.
 - Lists all active and known clients with friendly name, SSRC, and status
 - Per-client volume slider (0–200%), mute toggle, and name editor
 - Audio player for the mixed stream (click the play button)
+- Language toggle (EN/JA) in the top-right corner; browser language is auto-detected on load
 
 ## Built-in Test Stream
 

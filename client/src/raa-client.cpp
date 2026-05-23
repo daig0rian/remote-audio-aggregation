@@ -179,7 +179,7 @@ struct Config {
 };
 
 static Config g_cfg = {
-    L"192.168.11.38", 4010,
+    L"10.0.0.1", 4010,
     64,
     200, 100,
     L"", L"", 5000,
@@ -248,7 +248,7 @@ static BOOL load_config(void) {
     if (GetFileAttributesW(g_ini_path) == INVALID_FILE_ATTRIBUTES)
         return FALSE;
 
-    GetPrivateProfileStringW(L"Connection", L"server_ip", L"192.168.11.38",
+    GetPrivateProfileStringW(L"Connection", L"server_ip", L"10.0.0.1",
                              g_cfg.server_ip, 64, g_ini_path);
     g_cfg.server_port = (int)GetPrivateProfileIntW(L"Connection", L"server_port", 4010, g_ini_path);
 

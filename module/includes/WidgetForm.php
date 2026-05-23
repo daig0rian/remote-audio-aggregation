@@ -15,7 +15,7 @@ class WidgetForm extends CWidgetForm {
 		return $this
 			->addField(
 				(new CWidgetFieldTextBox('server_host', _('RAA Server Host')))
-					->setDefault('192.168.11.38')
+					->setDefault('10.0.0.1')
 					->setFlags(CWidgetFieldTextBox::FLAG_NOT_EMPTY)
 			)
 			->addField(

@@ -2,12 +2,13 @@
 
 [English version here](README.md)
 
-複数の Windows PC のシステム音声をキャプチャし、混合した音声を WebSocket 経由でブラウザにストリーミングする低遅延音声集約システムです。SIP・PBX 不要、ポートフォワード 2 本だけで NAT を越えられます。
+複数の Windows PC のシステム音声をキャプチャし、ミキシングした音声をブラウザにストリーミングする低遅延音声集約システムです。クライアント/サーバともに低負荷、NAT耐性あり、HTTPS環境不要。
 
 <table>
   <tr>
     <td align="center"><b>Win32 クライアント</b><br><img src="docs/screenshot-client.png" alt="Win32 クライアント" width="380"></td>
-    <td align="center"><b>サーバー管理 WebUI</b><br><img src="docs/screenshot-webui-ja.png" alt="サーバー管理 WebUI" width="380"></td>
+    <td align="center"><b>サーバー WebUI</b><br><img src="docs/screenshot-webui-ja.png" alt="サーバー管理 WebUI" width="380"></td>
+    <td align="center"><b>Zabbixモジュール</b><br><img src="docs/screenshot-zabbix.png" alt="Zabbixモジュール" width="380"></td>
   </tr>
 </table>
 
@@ -15,26 +16,27 @@
 
 ```
 [Windows PC-A] ──UDP:4010──┐
-[Windows PC-B] ──UDP:4010──┤──→ [Linux サーバー] ──WebSocket:4011──→ [ブラウザ]
+[Windows PC-B] ──UDP:4010──┤──→ [Linux サーバー] ──WebSocket:4011── [Zabbix]
 [Windows PC-C] ──UDP:4010──┘           │
                                     WebUI :4011
 ```
 
-- **クライアント → サーバー**: UDP 一方向（fire & forget）。クライアント側への着信ポートは不要。
-- **ブラウザ → サーバー**: WebSocket アウトバウンド接続。ポートフォワード 2 本（UDP 4010・TCP 4011）で NAT 越え可能。
+- **クライアント → サーバー**: RTP（Opus）でPC音声を送信。 宛先ポートはudp:4010。
+- **ブラウザ → サーバー**: http + WebSocket。 宛先ポートはTCP:4011。
+- **Zabbix → サーバー**: WebSocket。 宛先ポートはTCP:4011。
 - **音声フォーマット**: Opus 48 kHz モノラル、20 ms フレーム、64 kbps、DTX 有効
 
 ## コンポーネント
 
-| コンポーネント | 状態 | 概要 |
+| コンポーネント  | 概要 |
 |---|---|---|
-| [Win32 クライアント](client/) | ✅ 完成 | システムトレイアプリ、WASAPI プロセスループバックキャプチャ、RTP/UDP 送信 |
-| [Node.js サーバー](server/) | ✅ 完成 | UDP 受信、ミキサー Worker Thread、WebSocket ブロードキャスト、REST 管理 API |
-| [Zabbix モジュール](module/) | ✅ 完成 | WebSocket 音声プレーヤーとミキサー設定リンクを持つ Zabbix ダッシュボードウィジェット |
+| [Win32 クライアント](client/)  | システムトレイアプリ、WASAPI プロセスループバックキャプチャ、RTP/UDP 送信 |
+| [Node.js サーバー](server/)  | UDP 受信、ミキサー Worker Thread、WebSocket による再生、REST 管理 API |
+| [Zabbix モジュール](module/)  | WebSocket 音声プレーヤーとミキサー設定リンクを持つ Zabbix ダッシュボードウィジェット |
 
 ## ダウンロード
 
-タグを打つたびに [GitHub Releases](https://github.com/daig0rian/remote-audio-aggregation/releases) へ自動公開されます。
+ビルド済最新バージョンは [GitHub Releases](https://github.com/daig0rian/remote-audio-aggregation/releases) へ公開されます。
 
 | ファイル | 内容 |
 |----------|------|
@@ -47,21 +49,11 @@
 
 ### 音声パイプライン（20 ms サイクル）
 
-1. **Win32 クライアント**が WASAPI Process Loopback でシステム音声をキャプチャ（マスターボリューム非依存）し、libopus でエンコードして RTP パケットを UDP で送信。
-2. **サーバーの UDP 受信部**が RTP ヘッダーを解析し、SSRC をクライアント ID として取得。Opus を PCM にデコードし、クライアントごとの RTP タイムスタンプ索引ジッターバッファにエンキュー。
-3. **ミキサー Worker Thread** が精密な 20 ms タイマーで動作。各クライアントのジッターバッファからフレームを取り出し（欠損時は PLC）、クライアントごとの音量スケーリングを適用して PCM を混合し、Opus に再エンコードしてメインスレッドに送信。
-4. **メインスレッド**がエンコード済みフレームをすべての WebSocket リスナーにブロードキャスト。
+1. **Win32 クライアント**が WASAPI Process Loopback でシステム音声をキャプチャし、Opus でエンコードして RTP パケットを UDP で送信。
+2. **サーバーの UDP 受信部**が RTP ヘッダーを解析し、SSRC・RTP タイムスタンプ・マーカービットを取得。ギャップ検出（マーカービット、または 300ms 超の無音）を行い、生 Opus データをミキサー Worker Thread に転送する。
+3. **ミキサー Worker Thread** が受信した Opus フレームをデコードして PCM に変換し、クライアントごとの RTP タイムスタンプ索引ジッターバッファにエンキュー。精密な 20 ms タイマーで各クライアントのバッファからフレームを取り出し（欠損時は PLC）、クライアントごとの音量スケーリングを適用して PCM を混合し、Opus に再エンコードしてメインスレッドに送信。
+4. **メインスレッド**がエンコード済みフレームをすべての接続 WebSocket リスナーに送信。
 5. **ブラウザ**が WebAssembly で Opus をデコードし、Web Audio API でスケジュール再生。
-
-### ジッターバッファ
-
-クライアントごとに RTP タイムスタンプ索引のジッターバッファをミキサー Worker 内に保持:
-
-- 再生開始前に 2 フレーム（40 ms）を事前バッファリング
-- フレーム欠損時: 最後のフレームを PLC として最大 2 サイクル（40 ms）繰り返し
-- `playoutTs` は PLC 時には進めず、実フレーム受信時にのみ前進。遅延到着フレームを有効活用可能
-- バッファオーバーフロー時は `playoutTs` より古いフレームを優先的に破棄。それでも不足する場合は最古フレームを破棄し `playoutTs` をリセットして枯渇連鎖を防止
-- ミュート/ミュート解除時: 滞留フレームをクリアし `playoutTs` をリセット
 
 ## パフォーマンス
 
@@ -78,19 +70,7 @@
 | ミキサーサイクル時間 — 最大 | ~4.4 ms |
 | サーバー CPU 使用率 | ~20 % |
 
-> **イベントループ遅延について**: 負荷テスト（`bench/load-test.js`）をサーバーと同じ VM 上で実行しているため、単一 vCPU を奪い合いメインスレッドのイベントループ遅延が高く計測される（~10 ms）。本番環境ではクライアントが別マシンになるためこの影響は発生しない。ミキサーは Worker Thread で動作し独立したスケジューラスロットを持つため影響を受けない — 音声品質に直結するのは上表の 0.87 ms である。
-
 ミキサーの処理予算は 1 サイクル 20 ms。同時発話 10 クライアントで 1 vCPU でも予算の 5 % 以下しか消費しない。
-
-### なぜクライアント増に対して安定しているか
-
-3 つの要因が重なっています。
-
-1. **エンコードが O(1)** — 何人が同時発話しても、1 サイクルあたりの Opus エンコードはちょうど 1 回。
-2. **デコードの定数が極めて小さい** — libopus は 20 ms モノラルフレームを ~0.3 ms でデコード（N-API ネイティブ呼び出し）。10 クライアントで ~3 ms のデコード処理が 20 ms 窓に分散して発生。
-3. **ミックスループが軽微** — N × 960 サンプルの加算処理は 10 クライアントでも ~0.05 ms。
-
-結果として CPU 使用率は `固定コスト + N × 1.5 %` 程度の増加に収まる（固定のエンコードコストが低クライアント数での底上げになるため、クライアント数に正比例はしない）。
 
 ### 想定される性能限界
 
@@ -112,7 +92,7 @@ WebSocket 聴取クライアント数の影響は軽微で、~200 同時ブラ�
 {"msg":"event loop delay","mean_ms":"10.6","p99_ms":"12.5","max_ms":"16.8"}
 ```
 
-`avg_active` は 1 サイクルで実際にミックスされたクライアントの平均数。`event loop delay` はメインスレッドの応答性（UDP 受信・WebSocket ブロードキャスト・HTTP）を反映します（同一 VM での負荷テスト実行により高めに計測）。
+`avg_active` は 1 サイクルで実際にミックスされたクライアントの平均数。`event loop delay` はメインスレッドの応答性（UDP 受信・WebSocket 送信・HTTP）を反映します（同一 VM での負荷テスト実行により高めに計測）。
 
 負荷テストの再現手順:
 
@@ -234,7 +214,7 @@ LOG_LEVEL=debug node src/main.js
 
 ### ダウンロード（推奨）
 
-[GitHub Releases](https://github.com/daig0rian/remote-audio-aggregation/releases) から `raa-client.exe` をダウンロードして、そのまま実行してください。インストーラーは不要です。
+[GitHub Releases](https://github.com/daig0rian/remote-audio-aggregation/releases) から `raa-client.exe` をダウンロードして好みのフォルダに保存し、そのまま実行してください。
 
 ### ソースからビルド
 
@@ -271,21 +251,10 @@ SSRC（管理 WebUI に表示されるクライアント識別子）は初回起
 
    | 項目 | デフォルト | 説明 |
    |------|-----------|------|
-   | RAA Server Host | `192.168.11.38` | RAA サーバーの IP またはホスト名（ブラウザから見えるアドレス） |
+   | RAA Server Host | `10.0.0.1` | RAA サーバーの IP またはホスト名（ブラウザから見えるアドレス） |
    | WebSocket Port | `4011` | RAA サーバーの HTTP/WS ポート |
    | Buffer (ms) | `200` | ジッターバッファサイズ |
 
-### ウィジェットのレイアウト
-
-```
-[ ▶ Monitor ]  [ Idle ]
-[════════════════════]   ← 音量メーター
-[ Mixer Settings ↗ ]    ← RAA サーバー管理画面を別タブで開く
-```
-
-- **▶ Monitor / ⏹ Stop** — WebSocket 音声ストリームのトグル
-- **音量メーター** — 混合済み Opus フレームサイズを反映（再生中に動作）
-- **Mixer Settings** — `http://<host>:<port>/` へのリンク（音量・ミュート・クライアント管理）
 
 ## 管理 WebUI
 
@@ -316,12 +285,6 @@ Opus ペイロードタイプ 111（RFC 7587）を使用した標準 RTP（RFC 3
 バイト 12+:  Opus ペイロード（20 ms、48 kHz、モノラル）
 ```
 
-## ポートフォワード設定（サーバーが NAT 内の場合）
-
-| ポート | プロトコル | 方向 | 用途 |
-|---|---|---|---|
-| 4010 | UDP | 外部 → サーバー | Win32 クライアントからの音声 |
-| 4011 | TCP | 外部 → サーバー | WebUI + WebSocket ブラウザリスナー |
 
 ## ログレベル
 
