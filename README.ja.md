@@ -28,8 +28,8 @@
 
 ## コンポーネント
 
-| コンポーネント  | 概要 |
-|---|---|---|
+| コンポーネント | 概要 |
+|---|---|
 | [Win32 クライアント](client/)  | システムトレイアプリ、WASAPI プロセスループバックキャプチャ、RTP/UDP 送信 |
 | [Node.js サーバー](server/)  | UDP 受信、ミキサー Worker Thread、WebSocket による再生、REST 管理 API |
 | [Zabbix モジュール](module/)  | WebSocket 音声プレーヤーとミキサー設定リンクを持つ Zabbix ダッシュボードウィジェット |
