@@ -3,28 +3,32 @@
 	align-items: center;
 	height: 100%;
 	box-sizing: border-box;
-	padding: 6px 12px;
+	padding: 3px 10px;
+	overflow: hidden;
 }
 
-/* Outer column: top-row / meter / link stacked vertically */
+/* Flex-wrap layout — items naturally flow into rows based on available space */
 .raa-controls {
 	display: flex;
-	flex-direction: column;
-	gap: 9px;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 7px 10px;
 	width: 100%;
 }
 
-/* Row 1: button + status side by side */
+/* Row 1: button + status */
 .raa-row-top {
 	display: flex;
 	align-items: center;
 	gap: 10px;
+	flex-shrink: 0;
 }
 
 /* Play/Stop toggle button — matches server WebUI green/red style */
 .raa-play-btn.btn {
-	padding: 0.3em 1em;
+	padding: 0.15em 0.8em;
 	font-size: 0.85em;
+	line-height: 1.4;
 	border: 1px solid #4caf50 !important;
 	color: #4caf50 !important;
 	background: transparent !important;
@@ -60,9 +64,9 @@
 	white-space: nowrap;
 }
 
-/* Row 2: meter bar */
+/* Meter bar — fixed 180px, flows into available space alongside other items */
 .raa-meter {
-	width: 100%;
+	flex: 0 0 180px;
 	height: 6px;
 	background: #2a2a3a;
 	border-radius: 3px;
@@ -76,13 +80,15 @@
 	transition: width 80ms;
 }
 
-/* Row 3: Mixer Settings link */
+/* Mixer Settings link */
 .raa-admin-link {
 	font-size: 0.75em;
 	color: #4caf50;
 	text-decoration: none;
 	opacity: 0.75;
 	line-height: 1;
+	white-space: nowrap;
+	flex-shrink: 0;
 }
 
 .raa-admin-link:hover {
