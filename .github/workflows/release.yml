@@ -16,14 +16,22 @@ jobs:
         with:
           token: ${{ github.token }}
 
-      - name: Pack server tarball
+      # node_modules を tgz に同梱する（package.json の bundleDependencies: true）。
+      # インストール先で npm install / registry.npmjs.org への接続が不要になる。
+      # 依存はすべて pure JS か、全プラットフォーム分のプリビルド N-API バイナリを
+      # 同梱した @evan/opus のみなので、ビルド環境の OS / Node バージョンに依存しない。
+      - name: Pack server tarball (with bundled node_modules)
         id: pack
         run: |
           cd server
           VERSION=${GITHUB_REF_NAME#v}
           npm version $VERSION --no-git-tag-version --allow-same-version
+          npm ci --omit=dev
           npm pack
-          echo "tarball=$(ls raa-server-*.tgz)" >> "$GITHUB_OUTPUT"
+          TARBALL=$(ls raa-server-*.tgz)
+          tar -tzf "$TARBALL" package/node_modules/@evan/opus/node/x64-linux.node >/dev/null \
+            || { echo "ERROR: node_modules not bundled in $TARBALL"; exit 1; }
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
 
       - name: Create release and upload server assets
         uses: softprops/action-gh-release@v3

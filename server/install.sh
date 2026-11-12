@@ -5,8 +5,10 @@
 #   bash install.sh v1.2.3   # installs specific version
 #
 # Installs to ~/raa-server and registers a systemd user service.
-# The only operation requiring sudo is: apt-get (build deps) and
-# loginctl enable-linger (once, so the service starts at boot without login).
+# The release tarball bundles node_modules (incl. prebuilt @evan/opus binaries),
+# so no npm install / registry.npmjs.org access / build tools are needed.
+# The only operation requiring sudo is loginctl enable-linger
+# (once, so the service starts at boot without login).
 set -euo pipefail
 
 REPO="daig0rian/remote-audio-aggregation"
@@ -25,7 +27,7 @@ fi
 echo "==> raa-server v${VERSION} → ${INSTALL_DIR}"
 
 # ── Prerequisite check ─────────────────────────────────────────────────────────
-for cmd in node npm curl tar; do
+for cmd in node curl tar; do
     command -v "$cmd" >/dev/null 2>&1 || {
         echo "ERROR: '$cmd' not found."
         echo "  Install Node.js >= 24 via nvm: https://github.com/nvm-sh/nvm"
@@ -42,13 +44,6 @@ fi
 
 NODE_BIN=$(command -v node)
 echo "==> Using Node.js $(node --version) at ${NODE_BIN}"
-
-# ── Build dependencies (apt — requires sudo, skipped if already installed) ────
-if ! dpkg -s build-essential libopus-dev >/dev/null 2>&1; then
-    echo "==> Installing build-essential and libopus-dev (requires sudo)..."
-    sudo apt-get update -qq
-    sudo apt-get install -y build-essential libopus-dev
-fi
 
 # ── Stop existing service if running ──────────────────────────────────────────
 if systemctl --user is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
@@ -67,8 +62,16 @@ curl -fsSL "$TARBALL_URL" -o "$TMP/raa-server.tgz"
 # ── Extract ────────────────────────────────────────────────────────────────────
 echo "==> Installing to ${INSTALL_DIR} ..."
 mkdir -p "$INSTALL_DIR"
+# Remove node_modules from a previous install so stale files from older
+# dependency versions don't get mixed with the bundled ones.
+rm -rf "$INSTALL_DIR/node_modules"
 # npm pack puts files under package/ — strip that prefix
 tar -xzf "$TMP/raa-server.tgz" -C "$INSTALL_DIR" --strip-components=1
+if [[ ! -d "$INSTALL_DIR/node_modules" ]]; then
+    echo "ERROR: node_modules is not bundled in raa-server-${VERSION}.tgz."
+    echo "  Releases before bundled node_modules require: cd $INSTALL_DIR && npm install --omit=dev"
+    exit 1
+fi
 
 # ── Download raa-client.exe (for WebUI distribution on closed LAN) ────────────
 CLIENT_URL="https://github.com/${REPO}/releases/download/v${VERSION}/raa-client.exe"
@@ -78,11 +81,6 @@ if curl -fsSL "$CLIENT_URL" -o "$INSTALL_DIR/public/raa-client.exe"; then
 else
     echo "WARN: raa-client.exe download failed — client download will not be available in WebUI"
 fi
-
-# ── npm install (builds @evan/opus native addon) ───────────────────────────────
-echo "==> Running npm install (building @evan/opus — may take a minute)..."
-cd "$INSTALL_DIR"
-npm install --omit=dev
 
 # ── systemd user service ───────────────────────────────────────────────────────
 echo "==> Installing systemd user service..."

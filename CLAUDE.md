@@ -446,15 +446,15 @@ source ~/.bashrc
 nvm install 24
 nvm alias default 24
 
-# 2. raa-server インストール（build-essential/libopus-dev の導入・サービス登録まで一括）
+# 2. raa-server インストール（展開・サービス登録まで一括）
 curl -fsSL https://github.com/daig0rian/remote-audio-aggregation/releases/latest/download/install.sh | bash
 ```
 
 `install.sh` が行う処理:
 - Node.js ≥ 24 チェック（なければエラー終了）
-- `build-essential` / `libopus-dev` を apt で導入（未インストール時のみ、sudo）
-- `~/raa-server` にパッケージを展開
-- `npm install`（`@evan/opus` ネイティブアドオンのコンパイル）
+- `~/raa-server` にパッケージを展開（既存の `node_modules` は削除してから展開、`config.json` は保持）
+  - tgz に `node_modules` を同梱（`package.json` の `bundleDependencies: true`、CI で `npm ci --omit=dev` 後に `npm pack`）。インストール時の `npm install`・registry.npmjs.org 接続・`build-essential`/`libopus-dev` は不要
+  - `@evan/opus` は全プラットフォーム分のプリビルド N-API バイナリ（libopus 静的リンク）を同梱しているため、Node.js メジャーバージョンが変わっても再ビルド不要
 - `~/.config/systemd/user/raa-server.service` を生成・登録・起動
 - `loginctl enable-linger`（ブート時起動許可、sudo、初回のみ）
 
@@ -474,7 +474,7 @@ VM (Ubuntu 24.04 LTS)       ← 2029年に次のLTSへ dist-upgrade
   └─ nvm                    ← シェルスクリプト、非常に安定
        └─ Node.js LTS       ← 3年ごとに nvm で切り替え
             └─ npm packages ← package-lock.json で管理、年1回更新
-                 └─ libopus ← apt 管理、コーデック仕様は2012年以来不変
+                 └─ libopus ← @evan/opus に静的リンク済み、コーデック仕様は2012年以来不変
 ```
 
 #### 年次パッケージ更新（所要30分程度）
@@ -489,9 +489,7 @@ systemctl --user restart raa-server
 ```bash
 nvm install 26            # 新しいLTSをインストール
 nvm alias default 26
-cd ~/raa-server
-npm rebuild               # @evan/opus をリビルド
-systemctl --user restart raa-server
+systemctl --user restart raa-server   # @evan/opus は N-API のため再ビルド不要
 # install.sh を再実行するとサービスファイルの ExecStart パスも更新される
 ```
 

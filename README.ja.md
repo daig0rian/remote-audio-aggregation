@@ -182,9 +182,8 @@ curl -fsSL https://github.com/daig0rian/remote-audio-aggregation/releases/latest
 
 スクリプトが行う処理:
 - Node.js ≥ 24 を確認（未インストールの場合はエラーで終了）
-- `build-essential` と `libopus-dev` が未インストールなら apt で導入（sudo、初回のみ）
 - サーバーパッケージを `~/raa-server` に展開
-- 現在のユーザーとして `npm install` を実行（`@evan/opus` ネイティブアドオンをコンパイル）
+  - リリース tgz には `node_modules`（プリビルド済み `@evan/opus` を含む）が同梱されているため、`npm install`・registry.npmjs.org への接続・ビルドツール（`build-essential` / `libopus-dev`）は不要
 - **systemd ユーザーサービス**を登録・起動
 - ログインなしでブート時から起動できるよう `loginctl enable-linger` を実行（sudo、初回のみ）
 

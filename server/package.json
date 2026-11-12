@@ -15,6 +15,7 @@
   "engines": {
     "node": ">=24"
   },
+  "bundleDependencies": true,
   "dependencies": {
     "@evan/opus": "^1.0.0",
     "@fastify/static": "^9.1.3",

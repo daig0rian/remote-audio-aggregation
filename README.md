@@ -182,9 +182,8 @@ curl -fsSL https://github.com/daig0rian/remote-audio-aggregation/releases/latest
 
 The script:
 - Checks for Node.js ≥ 24 (exits with an error if not found)
-- Installs `build-essential` and `libopus-dev` via apt if missing (requires sudo, once)
 - Downloads and extracts the server package to `~/raa-server`
-- Runs `npm install` as the current user (compiles the `@evan/opus` native addon)
+  - The release tarball bundles `node_modules` (including prebuilt `@evan/opus` binaries), so no `npm install`, no access to registry.npmjs.org, and no build tools (`build-essential` / `libopus-dev`) are needed
 - Registers and starts a **systemd user service**
 - Runs `loginctl enable-linger` so the service starts at boot without login (requires sudo, once)
 
