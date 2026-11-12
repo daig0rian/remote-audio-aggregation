@@ -104,7 +104,7 @@ node bench/load-test.js 40 10 127.0.0.1
 ## 技術スタック
 
 ### サーバー
-- **ランタイム**: Node.js ≥ 24（LTS）
+- **ランタイム**: Node.js ≥ 22（LTS）
 - **HTTP/REST**: [Fastify](https://fastify.dev/)
 - **WebSocket**: [ws](https://github.com/websockets/ws)
 - **Opus コーデック**: [@evan/opus](https://github.com/evan/opus)（N-API ネイティブバインディング）
@@ -165,13 +165,21 @@ remote-audio-aggregation/
 
 ## サーバーセットアップ（Ubuntu 24.04 LTS）
 
-### 1. nvm で Node.js をインストール
+### 1. Node.js（22 以上）をインストール
+
+OS パッケージの Node.js が 22 以上ならそれを使えます（`apt-cache policy nodejs` で候補バージョンを確認）。
+
+```bash
+sudo apt install nodejs
+```
+
+OS パッケージが 22 未満の場合（例: Ubuntu 24.04 は 18）は nvm で導入します。
 
 ```bash
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
 source ~/.bashrc
-nvm install 24
-nvm alias default 24
+nvm install 22
+nvm alias default 22
 ```
 
 ### 2. raa-server をインストール
@@ -181,7 +189,7 @@ curl -fsSL https://github.com/daig0rian/remote-audio-aggregation/releases/latest
 ```
 
 スクリプトが行う処理:
-- Node.js ≥ 24 を確認（未インストールの場合はエラーで終了）
+- Node.js ≥ 22 を確認（未インストールの場合はエラーで終了）
 - サーバーパッケージを `~/raa-server` に展開
   - リリース tgz には `node_modules`（プリビルド済み `@evan/opus` を含む）が同梱されているため、`npm install`・registry.npmjs.org への接続・ビルドツール（`build-essential` / `libopus-dev`）は不要
 - **systemd ユーザーサービス**を登録・起動

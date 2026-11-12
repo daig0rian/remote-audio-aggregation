@@ -104,7 +104,7 @@ node bench/load-test.js 40 10 127.0.0.1
 ## Tech Stack
 
 ### Server
-- **Runtime**: Node.js ≥ 24 (LTS)
+- **Runtime**: Node.js ≥ 22 (LTS)
 - **HTTP/REST**: [Fastify](https://fastify.dev/)
 - **WebSocket**: [ws](https://github.com/websockets/ws)
 - **Opus codec**: [@evan/opus](https://github.com/evan/opus) (N-API native binding)
@@ -165,13 +165,21 @@ remote-audio-aggregation/
 
 ## Server Setup (Ubuntu 24.04 LTS)
 
-### 1. Install Node.js via nvm
+### 1. Install Node.js (22 or later)
+
+If your OS package provides Node.js 22 or later, you can use it (check the candidate version with `apt-cache policy nodejs`).
+
+```bash
+sudo apt install nodejs
+```
+
+If the OS package is older than 22 (e.g. Ubuntu 24.04 ships 18), install via nvm instead.
 
 ```bash
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
 source ~/.bashrc
-nvm install 24
-nvm alias default 24
+nvm install 22
+nvm alias default 22
 ```
 
 ### 2. Install raa-server
@@ -181,7 +189,7 @@ curl -fsSL https://github.com/daig0rian/remote-audio-aggregation/releases/latest
 ```
 
 The script:
-- Checks for Node.js ≥ 24 (exits with an error if not found)
+- Checks for Node.js ≥ 22 (exits with an error if not found)
 - Downloads and extracts the server package to `~/raa-server`
   - The release tarball bundles `node_modules` (including prebuilt `@evan/opus` binaries), so no `npm install`, no access to registry.npmjs.org, and no build tools (`build-essential` / `libopus-dev`) are needed
 - Registers and starts a **systemd user service**

@@ -440,18 +440,18 @@ Node.js は nvm でユーザースコープ管理し、systemd ユーザーサ�
 #### 手順（Ubuntu 24.04 LTS）
 
 ```bash
-# 1. nvm + Node.js 24
+# 1. Node.js ≥ 22（OS パッケージが 22 以上なら sudo apt install nodejs でよい。Ubuntu 24.04 は 18 なので nvm）
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
 source ~/.bashrc
-nvm install 24
-nvm alias default 24
+nvm install 22
+nvm alias default 22
 
 # 2. raa-server インストール（展開・サービス登録まで一括）
 curl -fsSL https://github.com/daig0rian/remote-audio-aggregation/releases/latest/download/install.sh | bash
 ```
 
 `install.sh` が行う処理:
-- Node.js ≥ 24 チェック（なければエラー終了）
+- Node.js ≥ 22 チェック（なければエラー終了）。`package.json` の `engines` も `>=22`（OS パッケージの Node.js 22 で動かすため。依存パッケージの要求は最大でも `20 || >=22`）
 - `~/raa-server` にパッケージを展開（既存の `node_modules` は削除してから展開、`config.json` は保持）
   - tgz に `node_modules` を同梱（`package.json` の `bundleDependencies: true`、CI で `npm ci --omit=dev` 後に `npm pack`）。インストール時の `npm install`・registry.npmjs.org 接続・`build-essential`/`libopus-dev` は不要
   - `@evan/opus` は全プラットフォーム分のプリビルド N-API バイナリ（libopus 静的リンク）を同梱しているため、Node.js メジャーバージョンが変わっても再ビルド不要

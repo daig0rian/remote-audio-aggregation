@@ -5,6 +5,7 @@
 #   bash install.sh v1.2.3   # installs specific version
 #
 # Installs to ~/raa-server and registers a systemd user service.
+# Requires Node.js >= 22 (the OS package `nodejs` works if it is >= 22; nvm also works).
 # The release tarball bundles node_modules (incl. prebuilt @evan/opus binaries),
 # so no npm install / registry.npmjs.org access / build tools are needed.
 # The only operation requiring sudo is loginctl enable-linger
@@ -30,15 +31,16 @@ echo "==> raa-server v${VERSION} → ${INSTALL_DIR}"
 for cmd in node curl tar; do
     command -v "$cmd" >/dev/null 2>&1 || {
         echo "ERROR: '$cmd' not found."
-        echo "  Install Node.js >= 24 via nvm: https://github.com/nvm-sh/nvm"
+        echo "  Install Node.js >= 22 (OS package: sudo apt install nodejs, or nvm: https://github.com/nvm-sh/nvm)"
         exit 1
     }
 done
 
 NODE_MAJOR=$(node -e 'process.stdout.write(process.versions.node.split(".")[0])')
-if [[ "$NODE_MAJOR" -lt 24 ]]; then
-    echo "ERROR: Node.js >= 24 required (found v${NODE_MAJOR})."
-    echo "  nvm install 24 && nvm use 24 && nvm alias default 24"
+if [[ "$NODE_MAJOR" -lt 22 ]]; then
+    echo "ERROR: Node.js >= 22 required (found $(node --version))."
+    echo "  If the OS package is older, install via nvm:"
+    echo "  nvm install 22 && nvm alias default 22"
     exit 1
 fi
 
