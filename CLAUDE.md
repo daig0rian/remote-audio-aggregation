@@ -88,6 +88,7 @@
 - **DTX漏れフレーム対策**: 無音中の散発的ノイズフロアフレームはデコーダリセット（`gap 300ms`）を発火させるが、`_audioStreak < 3` の場合はログ抑制。
 - **ブラウザバッファ**: `BUFFER_MS = 200`（`public/index.html`）
 - **ログ**: `pino`（`src/logger.js`）、`LOG_LEVEL` 環境変数で制御。`info`（デフォルト）/ `debug` / `warn`
+  - 5秒ごとの統計（`mix cycle stats` / `event loop delay`）は情報量が多いため `debug` レベル。既定の `info` では出ない
 
 #### systemd ユーザーサービス（実施済み）
 

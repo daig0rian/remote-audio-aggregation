@@ -16,10 +16,11 @@ const HTTP_PORT = parseInt(process.env.HTTP_PORT || '4011');
 clients.load();
 
 // イベントループ遅延を5秒毎に記録（メインスレッドの詰まり検知）
+// 情報量が多いため debug レベル（LOG_LEVEL=debug で出力）
 const eldMonitor = monitorEventLoopDelay({ resolution: 10 });
 eldMonitor.enable();
 setInterval(() => {
-    log.info({
+    log.debug({
         mean_ms: (eldMonitor.mean    / 1e6).toFixed(2),
         p99_ms:  (eldMonitor.percentile(99) / 1e6).toFixed(2),
         max_ms:  (eldMonitor.max     / 1e6).toFixed(2),

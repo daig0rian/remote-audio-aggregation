@@ -85,7 +85,13 @@ WebSocket 聴取クライアント数の影響は軽微で、~200 同時ブラ�
 
 ### パフォーマンス監視
 
-サーバーは 5 秒ごとに `info` レベルでタイミング統計をログ出力します。
+サーバーは 5 秒ごとにタイミング統計をログ出力します。情報量が多いため `debug` レベルで出力され、既定（`info`）では表示されません。表示するには `LOG_LEVEL=debug` で起動します。
+
+```bash
+# systemd サービスの場合: [Service] に Environment=LOG_LEVEL=debug を追記して再起動
+systemctl --user edit raa-server
+systemctl --user restart raa-server
+```
 
 ```json
 {"msg":"mix cycle stats","mean_ms":"0.87","p99_ms":"2.0","max_ms":"4.42","avg_active":"11.0"}

@@ -85,7 +85,13 @@ WebSocket listener count has negligible impact up to ~200 concurrent browsers (e
 
 ### Monitoring
 
-The server emits timing statistics every 5 seconds at `info` level:
+The server emits timing statistics every 5 seconds. Because they are verbose, they are logged at `debug` level and hidden by default (`info`). Start with `LOG_LEVEL=debug` to see them:
+
+```bash
+# For the systemd service: add Environment=LOG_LEVEL=debug under [Service], then restart
+systemctl --user edit raa-server
+systemctl --user restart raa-server
+```
 
 ```json
 {"msg":"mix cycle stats","mean_ms":"0.87","p99_ms":"2.0","max_ms":"4.42","avg_active":"11.0"}

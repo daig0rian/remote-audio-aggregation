@@ -49,7 +49,8 @@ setInterval(() => {
         cum += _sBuckets[i];
         if (cum >= p99target) { p99 = i * 0.5; break; }
     }
-    log.info({
+    // 情報量が多いため debug レベル（LOG_LEVEL=debug で出力）
+    log.debug({
         n:          _sN,
         mean_ms:    mean.toFixed(2),
         p99_ms:     p99.toFixed(1),
