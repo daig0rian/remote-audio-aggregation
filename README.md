@@ -303,6 +303,6 @@ Bytes 12+: Opus payload (20 ms, 48 kHz, mono)
 |-------|---------------|
 | `info` (default) | Server start/stop, client connect/disconnect |
 | `debug` | Decoder resets, per-frame events |
-| `warn` | Jitter buffer starvation, resync events |
+| `warn` | Jitter buffer starvation, resync events, WebSocket listeners too slow to keep up (frames are dropped for them) |
 
 Set via `LOG_LEVEL=debug` environment variable or in the systemd unit file.

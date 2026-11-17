@@ -74,23 +74,42 @@ setTimeout(sendBgmFrame, 20);
 // ---- 仮想BGMクライアントここまで ----
 
 // ---- WebSocket ----
-const wss = new WebSocketServer({ noServer: true });
-const wsClients = new Set();
+// ws.send() は相手の受信速度を見ずに送信待ちを積むため、受信の遅いリスナーが 1 つあるだけで
+// メモリと遅延が伸び続ける。送信待ちがこの量を超えている間は、そのリスナーへのフレームを捨てる。
+// 64 kbps 前後のストリームで約 4 秒分。
+const WS_MAX_BUFFERED_BYTES = 32 * 1024;
 
-wss.on('connection', (ws) => {
-    wsClients.add(ws);
-    log.info({ total: wsClients.size }, 'ws client connected');
+const wss = new WebSocketServer({ noServer: true });
+const wsClients = new Map();   // ws -> { remote, dropped }
+
+wss.on('connection', (ws, req) => {
+    const state = { remote: req.socket.remoteAddress, dropped: 0 };
+    wsClients.set(ws, state);
+    log.info({ remote: state.remote, total: wsClients.size }, 'ws client connected');
     ws.on('close', () => {
         wsClients.delete(ws);
-        log.info({ total: wsClients.size }, 'ws client disconnected');
+        log.info({ remote: state.remote, total: wsClients.size, dropped: state.dropped || undefined },
+                 'ws client disconnected');
     });
 });
 
 mixer.on('message', (msg) => {
     if (msg.type !== 'frame') return;
     const buf = msg.data;
-    for (const ws of wsClients) {
-        if (ws.readyState === 1) ws.send(buf, { binary: true });
+    for (const [ws, state] of wsClients) {
+        if (ws.readyState !== 1) continue;
+        if (ws.bufferedAmount > WS_MAX_BUFFERED_BYTES) {
+            if (state.dropped++ === 0) {
+                log.warn({ remote: state.remote, buffered: ws.bufferedAmount },
+                         'ws client too slow, dropping frames');
+            }
+            continue;
+        }
+        if (state.dropped > 0) {
+            log.info({ remote: state.remote, dropped: state.dropped }, 'ws client caught up');
+            state.dropped = 0;
+        }
+        ws.send(buf, { binary: true });
     }
 });
 

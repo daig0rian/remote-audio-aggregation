@@ -86,6 +86,7 @@
 - **RTPタイムスタンプ駆動ジッターバッファ** (`mixer.js`): PLC時は `playoutTs` を据え置き、実フレームが届いたサイクルで前進させる。スターベーション後は jitter buffer 内の最古フレームに自動 resync。
 - **ミュート解除時のリセット**: ミュート中に溜まった stale フレームと `playoutTs` をクリアして再プライム。
 - **DTX漏れフレーム対策**: 無音中の散発的ノイズフロアフレームはデコーダリセット（`gap 300ms`）を発火させるが、`_audioStreak < 3` の場合はログ抑制。
+- **WebSocket 送信の上限**: `ws.send()` は相手の受信速度を見ずに送信待ちを積むため、送信待ち（`ws.bufferedAmount`）が 32KB（約 4 秒分）を超えたリスナーにはフレームを送らない（`main.js`）。受信の遅いリスナー 1 つでメモリが増え続けるのを防ぐ。捨て始めと追いついたときに warn / info ログが出る。
 - **ブラウザバッファ**: `BUFFER_MS = 200`（`public/index.html`）
 - **ログ**: `pino`（`src/logger.js`）、`LOG_LEVEL` 環境変数で制御。`info`（デフォルト）/ `debug` / `warn`
   - 5秒ごとの統計（`mix cycle stats` / `event loop delay`）は情報量が多いため `debug` レベル。既定の `info` では出ない
