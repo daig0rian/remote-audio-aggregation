@@ -24,6 +24,7 @@ A low-latency audio aggregation system that captures system audio from multiple 
 - **Clients → Server**: RTP (Opus) over UDP. Destination port: UDP 4010.
 - **Browser → Server**: HTTP + WebSocket. Destination port: TCP 4011.
 - **Zabbix → Server**: WebSocket. Destination port: TCP 4011.
+- **Win32 Player → Server**: WebSocket. Destination port: TCP 4011.
 - **Audio format**: Opus 48 kHz mono, 20 ms frames, 64 kbps, DTX enabled
 
 ## Components
@@ -33,6 +34,7 @@ A low-latency audio aggregation system that captures system audio from multiple 
 | [Win32 Client](client/) | System tray app, WASAPI process loopback capture, RTP/UDP sender |
 | [Node.js Server](server/) | UDP receiver, mixer worker thread, WebSocket audio stream, REST management API |
 | [Zabbix Module](module/) | Zabbix dashboard widget with WebSocket audio player and Mixer Settings link |
+| [Win32 Player](player/) | System tray player — listen to the mixed stream on Windows without a modern browser (e.g. Windows Server 2019) |
 
 ## Download
 
@@ -41,6 +43,7 @@ The latest pre-built release is available on [GitHub Releases](https://github.co
 | Asset | Description |
 |-------|-------------|
 | `raa-client.exe` | Win32 client — download and run, no installer needed |
+| `raa-player.exe` | Win32 player — download and run, no installer needed |
 | `raa-server-x.y.z.tgz` | Server Node.js package |
 | `install.sh` | Server install script |
 | `raa_monitor-x.y.z.zip` | Zabbix dashboard widget module |
@@ -125,6 +128,14 @@ node bench/load-test.js 40 10 127.0.0.1
 - **UI**: `Shell_NotifyIcon` system tray with three icon states (active / silent / error)
 - **Config**: `%APPDATA%\raa-client\raa-client.ini`
 
+### Win32 Player
+- **Language**: C++ / Win32 API (MSVC)
+- **Receive**: WebSocket (RFC 6455, minimal implementation on Winsock; every wait has a timeout)
+- **Codec**: libopus 1.3.1 (statically linked, shared with the client build)
+- **Audio output**: WASAPI shared mode (follows the default output device)
+- **UI**: `Shell_NotifyIcon` system tray with four icon states (playing / idle / stopped / offline)
+- **Config**: `%APPDATA%\raa-player\raa-player.ini`
+
 ## Directory Structure
 
 ```
@@ -138,6 +149,13 @@ remote-audio-aggregation/
 │   ├── get_opus.bat         # Downloads and builds libopus from source
 │   ├── app.manifest         # Windows 10+ compatibility manifest
 │   └── raa-client.rc        # Resource file (icons, version info)
+├── player/                  # Win32 C++ player
+│   ├── src/
+│   │   └── raa-player.cpp   # Main source (WebSocket + libopus + WASAPI + tray UI)
+│   ├── icons/               # playing / idle / stopped / offline .ico and generator script
+│   ├── build.bat            # MSVC build script (libopus shared with client/deps)
+│   ├── app.manifest
+│   └── raa-player.rc        # Resource file (icons, settings dialog)
 ├── module/                  # Zabbix dashboard widget
 │   ├── manifest.json
 │   ├── Widget.php
@@ -245,6 +263,59 @@ build.bat
 On first run with no config file present, the settings dialog opens automatically. Enter the server IP address and click OK. The app then starts capturing and transmitting audio.
 
 The SSRC (client identifier shown in the management WebUI) is generated once and saved to `%APPDATA%\raa-client\raa-client.ini`.
+
+## Win32 Player
+
+A system tray app that plays the mixed stream through the PC's own speakers — for Windows machines without a modern browser (e.g. Windows Server 2019).
+
+### Download
+
+Download `raa-player.exe` from [GitHub Releases](https://github.com/daig0rian/remote-audio-aggregation/releases), save it to any folder, and run it directly.
+
+### First Launch
+
+The settings dialog opens automatically. Click OK to start playback.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| Server | — | IP address or host name of the RAA server |
+| Port | `4011` | HTTP/WS port of the RAA server |
+| Buffer (ms) | `200` | Larger values survive network hiccups; smaller values reduce delay (40–2000) |
+| Start automatically at sign-in | Off | |
+
+Settings are saved to `%APPDATA%\raa-player\raa-player.ini`; the log is `raa-player.log` in the same folder.
+
+### Tray Icon
+
+| Icon | State |
+|------|-------|
+| Blue | Playing (audio present) |
+| Slate | Idle (connected, silence) |
+| Grey with slash | Stopped (right-click → Play to resume) |
+| Red | Cannot reach the server, or cannot open the audio output device |
+
+The tooltip shows the current delay. Right-click for Play/Stop, mixer settings, settings and the log folder.
+
+### Behavior
+
+- Reconnects automatically after a server restart or network outage (retries at most 10 s apart).
+- Delay stays around the buffer setting and does not creep up over long sessions. Drift between the PC and server clocks is absorbed during silence; if the delay exceeds the setting by more than 0.5 s (e.g. after a network stall), playback skips ahead.
+- Switches to the new device when the default output device changes.
+- Adjust the volume in the Windows volume mixer (per-app volume). Per-source volume is set in the server's management WebUI.
+
+### Notes
+
+- **Do not run it on the same PC as raa-client.** raa-client would capture what raa-player plays and send it back to the server, creating an audio loop.
+- It runs in the signed-in user's session. For an unattended PC that must keep playing after a reboot, turn on "Start automatically at sign-in" and configure automatic sign-in.
+
+### Build from Source
+
+```bat
+cd player
+build.bat
+```
+
+libopus is shared with the client (`client\deps\libopus.lib`, built automatically if missing). The output is `player\raa-player.exe`.
 
 ## Zabbix Module
 

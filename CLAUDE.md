@@ -60,6 +60,7 @@
 | Phase 3: サーバー管理WebUI | ✅ 完了 | クライアント一覧・音量・ミュート・削除・名前編集・3状態表示 動作確認済み |
 | クライアント無音帯域削減 | ✅ 完了 | DTX heartbeat ~5pps、Markerビット RFC 7587準拠、isSilence閾値修正 |
 | Phase 4: Zabbixモジュール | ✅ 完了 | ARI不要のシンプル構成。単一トグルボタン・メーターバー・Mixer Settingsリンク。動作確認済み |
+| Phase 5: Win32プレイヤー（raa-player.exe） | 🔲 実機未確認 | モダンブラウザのない Windows（Server 2019 等）向けのトレイ常駐プレイヤー。WebSocket 受信・遅延上限つきジッターバッファ・自動再接続 |
 
 ### 開発環境
 - **Windowsホスト**: 192.168.11.33（KVMホスト）
@@ -152,6 +153,16 @@ journalctl --user -u raa-server -f
 - Opus エンコーダも `opus_encoder_create(48000, 1, ...)` に合わせること（チャンネル数の不整合はクラッシュする）。
 - サーバー側 `mixer.js` の `CHANNELS` も同じ値にすること。クライアントとサーバーで不一致があると無音になる。
 
+### Win32プレイヤー（raa-player）の重要事項
+
+ソースは `player/src/raa-player.cpp`。libopus は `client/deps` を共用（`player/build.bat` が無ければ `client/get_opus.bat` を呼ぶ）。
+
+- **受信のあらゆる待ちにタイムアウトを持たせる。** 半開きの TCP 接続で無音のまま止まると、監視用途では警告音を聞き逃す。そのため WebSocket（RFC 6455 受信側）を Winsock 上に最小実装し、select の 200ms 刻みで停止要求と無受信を確認している。サーバーは無音中も 50fps で送るので、3 秒受信がなければ切断とみなして再接続する（バックオフ 1→10 秒）。
+- **遅延に上限を持たせる。** ①受信は常に読み切り、サーバー側に送信待ちを溜めない（溜まるとサーバーがフレームを捨て始める）。②ジッターバッファは無音フレーム（ピーク < -60 dBFS）を間引き/複製して `buffer_ms` ±60ms に寄せ、時計のずれを吸収する。③ `buffer_ms` + 500ms を超えたら先へ飛ばす。いずれもログの `Stats:` 行（10 分ごと）で回数を確認できる。
+- **出力**: WASAPI 共有モード + `EVENTCALLBACK | AUTOCONVERTPCM`、48kHz モノラル float を渡し、デバイス形式への変換は WASAPI に任せる。既定デバイスの変更は `IMMNotificationClient` で検知して開き直す。デバイスが使えない間は受信フレームを溜めない。
+- **raa-client と同じ PC では使わない。** Process Loopback は自プロセスしか除外できないため、raa-player の出力を拾って送り返しループする。
+- 設定: `%APPDATA%\raa-player\raa-player.ini`（`[Connection] server_host / server_port`、`[Playback] buffer_ms`、`[General] autostart`）。音量設定は持たない（Windows の音量ミキサーとサーバー WebUI の 2 か所で足りる）。
+
 ### リリースワークフロー（GitHub Actions）
 
 タグ `v*` を push すると `.github/workflows/release.yml` が自動実行される。
@@ -163,8 +174,9 @@ git tag v0.x.y && git push origin v0.x.y
   │    npm pack          # raa-server-0.x.y.tgz を生成
   │    → GitHub Release 作成 + raa-server-0.x.y.tgz / install.sh をアップロード
   └─ client-build (windows-latest) ← server-pack 完了後に実行
-       build.bat         # libopus 自動ビルド → raa-client.exe
-       → 同リリースに raa-client.exe をアップロード
+       client\build.bat  # libopus 自動ビルド → raa-client.exe
+       player\build.bat  # 同じ libopus を使って → raa-player.exe
+       → 同リリースに raa-client.exe / raa-player.exe をアップロード
 ```
 
 **注意点:**

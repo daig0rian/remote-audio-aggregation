@@ -9,6 +9,11 @@ client/*.res
 client/build_out.txt
 client/build_err.txt
 
+# ── Player: build outputs ────────────────────────────────
+player/*.exe
+player/*.obj
+player/*.res
+
 # ── PoC: build outputs ───────────────────────────────────
 poc/phase0b/*.exe
 poc/phase0b/*.obj

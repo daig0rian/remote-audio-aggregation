@@ -24,6 +24,7 @@
 - **クライアント → サーバー**: RTP（Opus）でPC音声を送信。 宛先ポートはudp:4010。
 - **ブラウザ → サーバー**: http + WebSocket。 宛先ポートはTCP:4011。
 - **Zabbix → サーバー**: WebSocket。 宛先ポートはTCP:4011。
+- **Win32 プレイヤー → サーバー**: WebSocket。 宛先ポートはTCP:4011。
 - **音声フォーマット**: Opus 48 kHz モノラル、20 ms フレーム、64 kbps、DTX 有効
 
 ## コンポーネント
@@ -33,6 +34,7 @@
 | [Win32 クライアント](client/)  | システムトレイアプリ、WASAPI プロセスループバックキャプチャ、RTP/UDP 送信 |
 | [Node.js サーバー](server/)  | UDP 受信、ミキサー Worker Thread、WebSocket による再生、REST 管理 API |
 | [Zabbix モジュール](module/)  | WebSocket 音声プレーヤーとミキサー設定リンクを持つ Zabbix ダッシュボードウィジェット |
+| [Win32 プレイヤー](player/)  | システムトレイ常駐の再生アプリ。モダンブラウザのない Windows（Windows Server 2019 など）でも混合音声を聞ける |
 
 ## ダウンロード
 
@@ -41,6 +43,7 @@
 | ファイル | 内容 |
 |----------|------|
 | `raa-client.exe` | Win32 クライアント — インストーラー不要、そのまま実行 |
+| `raa-player.exe` | Win32 プレイヤー — インストーラー不要、そのまま実行 |
 | `raa-server-x.y.z.tgz` | サーバー Node.js パッケージ |
 | `install.sh` | サーバーインストールスクリプト |
 | `raa_monitor-x.y.z.zip` | Zabbix ダッシュボードウィジェットモジュール |
@@ -125,6 +128,14 @@ node bench/load-test.js 40 10 127.0.0.1
 - **UI**: `Shell_NotifyIcon` システムトレイ（アクティブ / 無音 / エラーの 3 状態アイコン）
 - **設定**: `%APPDATA%\raa-client\raa-client.ini`
 
+### Win32 プレイヤー
+- **言語**: C++ / Win32 API（MSVC）
+- **受信**: WebSocket（RFC 6455、Winsock 上の最小実装。待ちにはすべてタイムアウトあり）
+- **コーデック**: libopus 1.3.1（静的リンク、クライアントと共用）
+- **音声出力**: WASAPI 共有モード（既定の出力デバイスに追従）
+- **UI**: `Shell_NotifyIcon` システムトレイ（再生中 / 待機中 / 停止中 / 未接続の 4 状態アイコン）
+- **設定**: `%APPDATA%\raa-player\raa-player.ini`
+
 ## ディレクトリ構成
 
 ```
@@ -138,6 +149,13 @@ remote-audio-aggregation/
 │   ├── get_opus.bat         # libopus のソースからのビルド
 │   ├── app.manifest         # Windows 10 以降互換マニフェスト
 │   └── raa-client.rc        # リソースファイル（アイコン、バージョン情報）
+├── player/                  # Win32 C++ プレイヤー
+│   ├── src/
+│   │   └── raa-player.cpp   # メインソース（WebSocket + libopus + WASAPI + トレイ UI）
+│   ├── icons/               # playing / idle / stopped / offline の .ico と生成スクリプト
+│   ├── build.bat            # MSVC ビルドスクリプト（libopus は client/deps を共用）
+│   ├── app.manifest
+│   └── raa-player.rc        # リソースファイル（アイコン、設定ダイアログ）
 ├── module/                  # Zabbix ダッシュボードウィジェット
 │   ├── manifest.json
 │   ├── Widget.php
@@ -245,6 +263,59 @@ build.bat
 設定ファイルがない状態で初回起動すると、設定ダイアログが自動的に表示されます。サーバーの IP アドレスを入力して OK を押すと、即座に音声キャプチャと送信が始まります。
 
 SSRC（管理 WebUI に表示されるクライアント識別子）は初回起動時に生成され、`%APPDATA%\raa-client\raa-client.ini` に保存されます。
+
+## Win32 プレイヤー
+
+モダンブラウザのない Windows（Windows Server 2019 など）で、混合音声をその PC のスピーカーから鳴らすためのトレイ常駐アプリです。
+
+### ダウンロード
+
+[GitHub Releases](https://github.com/daig0rian/remote-audio-aggregation/releases) から `raa-player.exe` をダウンロードして好みのフォルダに保存し、そのまま実行してください。
+
+### 初回起動
+
+設定ダイアログが自動的に表示されます。OK を押すと再生が始まります。
+
+| 項目 | デフォルト | 説明 |
+|------|-----------|------|
+| サーバー | — | RAA サーバーの IP アドレスまたはホスト名 |
+| ポート | `4011` | RAA サーバーの HTTP/WS ポート |
+| バッファ (ms) | `200` | 大きくすると途切れにくく、小さくすると遅れが短くなる（40〜2000） |
+| サインイン時に自動で起動する | オフ | |
+
+設定は `%APPDATA%\raa-player\raa-player.ini`、ログは同じフォルダの `raa-player.log` に保存されます。
+
+### トレイアイコン
+
+| アイコン | 状態 |
+|---------|------|
+| 青 | 再生中（音声あり） |
+| 灰青 | 待機中（接続済み・無音） |
+| 灰に斜線 | 停止中（右クリック →「再生」で再開） |
+| 赤 | サーバーに接続できない、または音声出力デバイスを開けない |
+
+ツールチップに現在の遅れの目安を表示します。右クリックで再生/停止・管理画面・設定・ログフォルダを開けます。
+
+### 動作
+
+- サーバーの再起動やネットワーク断のあとは自動で再接続します（再試行は最大 10 秒間隔）。
+- 遅れはバッファの設定値の前後に保たれ、長時間つなぎっぱなしでも伸び続けません。PC とサーバーの時計の差で生じるずれは無音の区間で吸収し、通信の詰まりなどで設定値より 0.5 秒以上遅れたときは先へ飛ばします。
+- 既定の出力デバイスが変わると、新しいデバイスで鳴らし直します。
+- 音量は Windows の音量ミキサー（アプリごとの音量）で調整します。送信元ごとの音量はサーバーの管理 WebUI で調整します。
+
+### 注意
+
+- **raa-client と同じ PC で動かさないでください。** raa-player が鳴らした音を raa-client が拾ってサーバーへ送り返し、音がループします。
+- サインインしたユーザーのセッションで動くアプリです。再起動後も無人で鳴らし続けるには、「サインイン時に自動で起動する」をオンにし、その PC に自動サインインを設定してください。
+
+### ソースからビルド
+
+```bat
+cd player
+build.bat
+```
+
+libopus はクライアントと共用します（`client\deps\libopus.lib` がなければ自動でビルド）。出力は `player\raa-player.exe` です。
 
 ## Zabbix モジュール
 

@@ -81,7 +81,15 @@ jobs:
         shell: cmd
         run: build.bat
 
-      - name: Upload client to release
+      # client\deps\libopus.lib built above is reused
+      - name: Build raa-player.exe
+        working-directory: player
+        shell: cmd
+        run: build.bat
+
+      - name: Upload client and player to release
         uses: softprops/action-gh-release@v3
         with:
-          files: client/raa-client.exe
+          files: |
+            client/raa-client.exe
+            player/raa-player.exe
