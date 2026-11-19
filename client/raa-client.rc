@@ -56,22 +56,39 @@ BEGIN
     CONTROL         "", IDC_AUDIO_GUARD_SPIN, "msctls_updown32", 0x50000026, 161, 42, 11, 13
 END
 
-// ---------- Batch page ----------
-IDD_PAGE_BATCH DIALOGEX 0, 0, 220, 160
+// ---------- Notify page (batch file / SNMP trap) ----------
+// Labels are set at runtime (page_notify). Batch and SNMP controls share the area below
+// the radio buttons; only the set for the selected method is shown.
+IDD_PAGE_NOTIFY DIALOGEX 0, 0, 262, 196
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_CHILD
 FONT 9, "MS UI Gothic"
 BEGIN
-    GROUPBOX        "On audio start", -1,             7,   7, 206,  38
-    EDITTEXT        IDC_BATCH_START,                 13,  20, 166, 13, ES_AUTOHSCROLL
-    PUSHBUTTON      "...", IDC_BATCH_START_BROWSE,  182,  20,  24, 13
+    LTEXT           "Method:", IDC_NOTIFY_LABEL,       7,   9,  50,  9
+    AUTORADIOBUTTON "Batch file", IDC_NOTIFY_BATCH,   60,   8,  90, 10, WS_GROUP | WS_TABSTOP
+    AUTORADIOBUTTON "SNMP trap", IDC_NOTIFY_SNMP,    155,   8, 100, 10
 
-    GROUPBOX        "On audio stop", -1,              7,  52, 206,  38
-    EDITTEXT        IDC_BATCH_STOP,                  13,  65, 166, 13, ES_AUTOHSCROLL
-    PUSHBUTTON      "...", IDC_BATCH_STOP_BROWSE,   182,  65,  24, 13
+    // Batch mode
+    GROUPBOX        "On audio start", IDC_BATCH_START_GROUP, 7, 26, 248, 34, WS_GROUP
+    EDITTEXT        IDC_BATCH_START,                  13,  39, 210, 13, ES_AUTOHSCROLL
+    PUSHBUTTON      "...", IDC_BATCH_START_BROWSE,   226,  39,  24, 13
+    GROUPBOX        "On audio stop", IDC_BATCH_STOP_GROUP,   7, 66, 248, 34
+    EDITTEXT        IDC_BATCH_STOP,                   13,  79, 210, 13, ES_AUTOHSCROLL
+    PUSHBUTTON      "...", IDC_BATCH_STOP_BROWSE,    226,  79,  24, 13
+    LTEXT           "Timeout (ms):", IDC_BATCH_TIMEOUT_LABEL, 7, 110, 70, 9
+    EDITTEXT        IDC_BATCH_TIMEOUT,                80, 108,  50, 13, ES_AUTOHSCROLL | ES_NUMBER
+    CONTROL         "", IDC_BATCH_TIMEOUT_SPIN, "msctls_updown32", 0x50000026, 130, 108, 11, 13
+    LTEXT           "", IDC_BATCH_NOTE,                7, 126, 248, 18
 
-    LTEXT           "Timeout (ms):", -1,              7,  98, 60,  9
-    EDITTEXT        IDC_BATCH_TIMEOUT,               70,  96, 60, 13, ES_AUTOHSCROLL | ES_NUMBER
-    CONTROL         "", IDC_BATCH_TIMEOUT_SPIN, "msctls_updown32", 0x50000026, 130, 96, 11, 13
+    // SNMP trap mode
+    LTEXT           "On audio start:", IDC_SNMP_START_LABEL, 7, 28, 180, 9
+    PUSHBUTTON      "Send test", IDC_SNMP_TEST_START, 195,  25,  60, 13
+    EDITTEXT        IDC_SNMP_START,                    7,  40, 248, 50, ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL
+    LTEXT           "On audio stop:", IDC_SNMP_STOP_LABEL,   7, 96, 180, 9
+    PUSHBUTTON      "Send test", IDC_SNMP_TEST_STOP,  195,  93,  60, 13
+    EDITTEXT        IDC_SNMP_STOP,                     7, 108, 248, 50, ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL
+    LTEXT           "Charset:", IDC_SNMP_CHARSET_LABEL, 7, 166, 50, 9
+    COMBOBOX        IDC_SNMP_CHARSET,                 60, 164,  90, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "", IDC_SNMP_HINT,                 7, 180, 248, 16
 END
 
 // ---------- General page ----------

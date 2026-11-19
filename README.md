@@ -126,6 +126,7 @@ node bench/load-test.js 40 10 127.0.0.1
 - **Codec**: libopus 1.3.1 (statically linked, no external DLLs)
 - **Network**: Winsock2 UDP, standard RTP framing (RFC 3550 + RFC 7587)
 - **UI**: `Shell_NotifyIcon` system tray with three icon states (active / silent / error)
+- **Start/stop notifications**: run a batch file, or send SNMP traps (v1 / v2c) directly — on a thread separate from audio
 - **Config**: `%APPDATA%\raa-client\raa-client.ini`
 
 ### Win32 Player
@@ -142,7 +143,8 @@ node bench/load-test.js 40 10 127.0.0.1
 remote-audio-aggregation/
 ├── client/                  # Win32 C++ client
 │   ├── src/
-│   │   └── raa-client.cpp   # Main source (WASAPI + libopus + RTP + tray UI)
+│   │   ├── raa-client.cpp   # Main source (WASAPI + libopus + RTP + tray UI)
+│   │   └── snmp-trap.cpp    # SNMP trap parsing, encoding and sending
 │   ├── deps/                # libopus static library and headers
 │   ├── icons/               # active.ico / silent.ico / error.ico
 │   ├── build.bat            # MSVC build script
@@ -263,6 +265,22 @@ build.bat
 On first run with no config file present, the settings dialog opens automatically. Enter the server IP address and click OK. The app then starts capturing and transmitting audio.
 
 The SSRC (client identifier shown in the management WebUI) is generated once and saved to `%APPDATA%\raa-client\raa-client.ini`.
+
+### Start/Stop Notifications
+
+The client can notify an NMS or similar when sound starts and stops. Choose the method on the **Notify** tab of the settings dialog.
+
+- **Send SNMP trap**: the client sends SNMPv1 / v2c traps itself. Traps are written with the same arguments as `snmptrap.exe`, so you can also paste the contents of an existing batch file as is. **Send test** sends what you have typed right away. String (`s`) values are sent in Shift_JIS by default (UTF-8 is also available).
+- **Run batch file**: runs the batch file set for start or for stop. A script still running after the timeout is terminated together with the processes it started.
+
+Either way, notifications run in order on a thread separate from audio sending, so a slow notification does not interrupt the audio.
+
+Example SNMP trap (SNMPv1):
+
+```
+-v 1 -c public 192.0.2.10 .1.3.6.1.4.1.99999.1 "" 6 1 ""
+.1.3.6.1.4.1.99999.1.1 s "Alarm sound playing"
+```
 
 ## Win32 Player
 

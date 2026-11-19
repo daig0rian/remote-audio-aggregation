@@ -38,6 +38,7 @@ cl ^
     /nologo /W3 /O2 /EHsc /MT /utf-8 ^
     /I"deps\include" ^
     src\raa-client.cpp ^
+    src\snmp-trap.cpp ^
     raa-client.res ^
     /link ^
     deps\libopus.lib ^

@@ -26,6 +26,9 @@ client/deps/
 # ── Claude Code local settings ──────────────────────────
 .claude/
 
+# ── Local scratch (site-specific batch files etc.) ──────
+temp/
+
 # ── OS noise ────────────────────────────────────────────
 .DS_Store
 Thumbs.db

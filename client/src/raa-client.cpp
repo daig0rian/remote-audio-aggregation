@@ -28,11 +28,13 @@
 #include <ws2tcpip.h>
 #include <rpc.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <math.h>
 
 #include "opus.h"
+#include "snmp-trap.h"
 #include "../resource.h"
 
 #pragma comment(lib, "comctl32.lib")
@@ -48,40 +50,11 @@
 // ComCtl32 v6 (visual styles, required for property sheet tabs)
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
+// Window messages and control IDs are in resource.h (shared with raa-client.rc).
 #define RTP_PT_OPUS 111
-#define WM_TRAY     (WM_USER + 1)
-#define WM_AUDIO_STATE (WM_USER + 2)  // wParam = AudioState
 
-#define IDM_STATUS  1001
-#define IDM_SETTINGS 1002
-#define IDM_OPEN_LOG 1003
-#define IDM_RELOAD  1004
-#define IDM_EXIT    1005
-
-#define IDD_PAGE_CONNECTION 2001
-#define IDD_PAGE_AUDIO      2002
-#define IDD_PAGE_DETECTION  2003
-#define IDD_PAGE_BATCH      2004
-#define IDD_PAGE_GENERAL    2005
-
-#define IDC_SERVER_IP           3001
-#define IDC_SERVER_PORT         3002
-#define IDC_SSRC_DISPLAY        3003
-#define IDC_BITRATE             3010
-#define IDC_BITRATE_SPIN        3011
-#define IDC_DTX_THRESHOLD       3020
-#define IDC_DTX_THRESHOLD_SPIN  3021
-#define IDC_ENTER_GUARD         3022
-#define IDC_ENTER_GUARD_SPIN    3023
-#define IDC_EXIT_GUARD          3024
-#define IDC_EXIT_GUARD_SPIN     3025
-#define IDC_BATCH_START         3030
-#define IDC_BATCH_START_BROWSE  3031
-#define IDC_BATCH_STOP          3032
-#define IDC_BATCH_STOP_BROWSE   3033
-#define IDC_BATCH_TIMEOUT       3034
-#define IDC_BATCH_TIMEOUT_SPIN  3035
-#define IDC_AUTOSTART           3040
+#define NOTIFY_BATCH 0   // [Notify] mode=batch : run start / stop batch files
+#define NOTIFY_SNMP  1   // [Notify] mode=snmp  : send SNMP traps directly
 
 // ============================================================
 // Localization
@@ -103,12 +76,29 @@ struct Strings {
     const wchar_t* tab_connection;
     const wchar_t* tab_audio;
     const wchar_t* tab_detection;
-    const wchar_t* tab_batch;
+    const wchar_t* tab_notify;
     const wchar_t* tab_general;
     const wchar_t* file_filter;
     const wchar_t* loopback_process;
     const wchar_t* loopback_classic;
     const wchar_t* loopback_note;
+    // Notify page
+    const wchar_t* notify_label;
+    const wchar_t* notify_batch;
+    const wchar_t* notify_snmp;
+    const wchar_t* on_start;
+    const wchar_t* on_stop;
+    const wchar_t* batch_timeout;
+    const wchar_t* batch_note;
+    const wchar_t* snmp_start_label;
+    const wchar_t* snmp_stop_label;
+    const wchar_t* snmp_test;
+    const wchar_t* snmp_charset;
+    const wchar_t* snmp_hint;
+    const wchar_t* snmp_invalid_fmt;   // %ls = on_start / on_stop, %ls = parser message
+    const wchar_t* snmp_test_empty;
+    const wchar_t* snmp_test_ok_fmt;   // %ls = destination and size
+    const wchar_t* snmp_test_fail_fmt; // %ls = error
 };
 
 static const Strings STR_JA = {
@@ -127,12 +117,28 @@ static const Strings STR_JA = {
     L"接続",
     L"オーディオ",
     L"無音検知",
-    L"バッチ",
+    L"通知",
     L"全般",
     L"スクリプト (*.bat;*.cmd;*.exe;*.ps1)\0*.bat;*.cmd;*.exe;*.ps1\0すべて (*.*)\0*.*\0",
     L"ボリューム/ミュートの影響を受けない方式 *",
     L"ボリューム/ミュートの影響を受ける方式",
     L"* Windows 10 ビルド 19041 (2004) 以降が必要",
+    L"通知方法:",
+    L"バッチファイルを実行",
+    L"SNMP Trap を送信",
+    L"音声開始時",
+    L"音声停止時",
+    L"タイムアウト (ms):",
+    L"時間内に終わらないバッチは、そこから起動したプロセスごと終了させます（0 = 無制限）。",
+    L"音声開始時に送る Trap:",
+    L"音声停止時に送る Trap:",
+    L"テスト送信",
+    L"文字コード:",
+    L"snmptrap.exe の引数と同じ書式です（-v 1 / -v 2c）。バッチファイルの中身をそのまま貼り付けても構いません。",
+    L"%ls の Trap の設定に誤りがあります。\n\n%ls",
+    L"Trap の引数が入力されていません。",
+    L"Trap を送信しました（%ls）。\n\nUDP のため、届いたかどうかはここではわかりません。マネージャー側で受信を確認してください。",
+    L"Trap を送信できませんでした。\n\n%ls",
 };
 
 static const Strings STR_EN = {
@@ -151,15 +157,33 @@ static const Strings STR_EN = {
     L"Connection",
     L"Audio",
     L"Detection",
-    L"Batch",
+    L"Notify",
     L"General",
     L"Scripts (*.bat;*.cmd;*.exe;*.ps1)\0*.bat;*.cmd;*.exe;*.ps1\0All files (*.*)\0*.*\0",
     L"Independent of master volume *",
     L"Affected by master volume",
     L"* Requires Windows 10 build 19041 (2004) or later",
+    L"Method:",
+    L"Run batch file",
+    L"Send SNMP trap",
+    L"On audio start",
+    L"On audio stop",
+    L"Timeout (ms):",
+    L"A script still running after the timeout is terminated together with the processes it started (0 = no limit).",
+    L"Trap on audio start:",
+    L"Trap on audio stop:",
+    L"Send test",
+    L"Charset:",
+    L"Same syntax as the snmptrap.exe arguments (-v 1 / -v 2c). You can paste the contents of your batch file as is.",
+    L"The trap for \"%ls\" is invalid.\n\n%ls",
+    L"No trap arguments entered.",
+    L"Trap sent (%ls).\n\nUDP gives no delivery confirmation; check that the manager received it.",
+    L"Could not send the trap.\n\n%ls",
 };
 
 static const Strings* S = &STR_JA;
+
+static BOOL ui_ja(void) { return S == &STR_JA; }
 
 // ============================================================
 // Config
@@ -176,6 +200,10 @@ struct Config {
     int     batch_timeout_ms;
     BOOL    autostart;
     int     loopback_mode;  // 0 = Process Loopback (build >= 19041), 1 = Classic Loopback
+    int     notify_mode;    // NOTIFY_BATCH / NOTIFY_SNMP
+    wchar_t snmp_start[SNMP_ARGS_MAX];   // snmptrap-style arguments, canonical one-line form
+    wchar_t snmp_stop[SNMP_ARGS_MAX];
+    UINT    snmp_charset;   // SNMP_CHARSET_SJIS / SNMP_CHARSET_UTF8
 };
 
 static Config g_cfg = {
@@ -184,7 +212,8 @@ static Config g_cfg = {
     200, 100,
     L"", L"", 5000,
     FALSE,
-    0   // loopback_mode: 0 = Process Loopback
+    0,  // loopback_mode: 0 = Process Loopback
+    NOTIFY_BATCH, L"", L"", SNMP_CHARSET_SJIS
 };
 
 static uint32_t g_ssrc = 0;
@@ -216,8 +245,72 @@ static wchar_t g_log_path[MAX_PATH];
 // Config INI  (Windows WritePrivateProfileString / GetPrivateProfileInt)
 // ============================================================
 
+// The *PrivateProfile*W functions keep Unicode only when the file is UTF-16LE with a BOM;
+// otherwise they read and write the ANSI code page. Trap texts contain Japanese, so the INI
+// is kept in UTF-16. An existing ANSI file (older versions) or UTF-8 file (edited with
+// Notepad) is converted once; a missing file is created empty with a BOM.
+static void ini_ensure_unicode(void) {
+    char*  data = NULL;
+    DWORD  size = 0;
+    HANDLE h = CreateFileW(g_ini_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (h != INVALID_HANDLE_VALUE) {
+        LARGE_INTEGER li = {};
+        if (!GetFileSizeEx(h, &li) || li.QuadPart > 1024 * 1024) { CloseHandle(h); return; }
+        size = (DWORD)li.QuadPart;
+        data = (char*)malloc(size + 1);
+        DWORD rd = 0;
+        if (!data || !ReadFile(h, data, size, &rd, NULL)) { CloseHandle(h); free(data); return; }
+        CloseHandle(h);
+        size = rd;
+        if (size >= 2 && (BYTE)data[0] == 0xFF && (BYTE)data[1] == 0xFE) { free(data); return; }
+    }
+
+    const char* src = data;
+    int  n  = (int)size;
+    UINT cp = CP_ACP;
+    if (n >= 3 && (BYTE)src[0] == 0xEF && (BYTE)src[1] == 0xBB && (BYTE)src[2] == 0xBF) {
+        cp = CP_UTF8; src += 3; n -= 3;
+    } else if (n > 0 && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, src, n, NULL, 0) > 0) {
+        cp = CP_UTF8;   // plain ASCII converts the same either way
+    }
+    int wn = (n > 0) ? MultiByteToWideChar(cp, 0, src, n, NULL, 0) : 0;
+    wchar_t* w = (wchar_t*)malloc((size_t)(wn + 1) * sizeof(wchar_t));
+    if (w) {
+        w[0] = 0xFEFF;
+        if (wn > 0) MultiByteToWideChar(cp, 0, src, n, w + 1, wn);
+        // Write a temporary file and swap it in, so a crash cannot leave a half-written INI.
+        wchar_t tmp[MAX_PATH + 8];
+        swprintf_s(tmp, MAX_PATH + 8, L"%s.tmp", g_ini_path);
+        HANDLE o = CreateFileW(tmp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (o != INVALID_HANDLE_VALUE) {
+            DWORD bytes = (DWORD)((wn + 1) * sizeof(wchar_t)), wr = 0;
+            BOOL ok = WriteFile(o, w, bytes, &wr, NULL) && wr == bytes;
+            CloseHandle(o);
+            if (!ok || !MoveFileExW(tmp, g_ini_path, MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp);
+        }
+        free(w);
+    }
+    free(data);
+}
+
+// GetPrivateProfileString strips one pair of quotes around a value. Values that start or end
+// with a quote get an extra pair so that they read back unchanged.
+static void ini_write_verbatim(const wchar_t* section, const wchar_t* key, const wchar_t* value) {
+    size_t n = wcslen(value);
+    BOOL edge_quote = n > 0 && (value[0] == L'"' || value[0] == L'\'' ||
+                                value[n - 1] == L'"' || value[n - 1] == L'\'');
+    if (!edge_quote) {
+        WritePrivateProfileStringW(section, key, value, g_ini_path);
+        return;
+    }
+    wchar_t buf[SNMP_ARGS_MAX + 2];
+    _snwprintf_s(buf, _countof(buf), _TRUNCATE, L"\"%ls\"", value);
+    WritePrivateProfileStringW(section, key, buf, g_ini_path);
+}
+
 static void save_config(void) {
     wchar_t buf[32];
+    ini_ensure_unicode();
 
     WritePrivateProfileStringW(L"Connection", L"server_ip",   g_cfg.server_ip,  g_ini_path);
     swprintf_s(buf, 32, L"%d", g_cfg.server_port);
@@ -240,6 +333,13 @@ static void save_config(void) {
     swprintf_s(buf, 32, L"%d", g_cfg.batch_timeout_ms);
     WritePrivateProfileStringW(L"Batch", L"timeout_ms",       buf,              g_ini_path);
 
+    WritePrivateProfileStringW(L"Notify", L"mode",
+                               g_cfg.notify_mode == NOTIFY_SNMP ? L"snmp" : L"batch", g_ini_path);
+    ini_write_verbatim(L"SnmpTrap", L"start_args", g_cfg.snmp_start);
+    ini_write_verbatim(L"SnmpTrap", L"stop_args",  g_cfg.snmp_stop);
+    WritePrivateProfileStringW(L"SnmpTrap", L"charset",
+                               g_cfg.snmp_charset == SNMP_CHARSET_UTF8 ? L"utf-8" : L"shift_jis", g_ini_path);
+
     WritePrivateProfileStringW(L"General", L"autostart", g_cfg.autostart ? L"1" : L"0", g_ini_path);
 }
 
@@ -247,6 +347,7 @@ static void save_config(void) {
 static BOOL load_config(void) {
     if (GetFileAttributesW(g_ini_path) == INVALID_FILE_ATTRIBUTES)
         return FALSE;
+    ini_ensure_unicode();
 
     GetPrivateProfileStringW(L"Connection", L"server_ip", L"10.0.0.1",
                              g_cfg.server_ip, 64, g_ini_path);
@@ -265,6 +366,15 @@ static BOOL load_config(void) {
     GetPrivateProfileStringW(L"Batch", L"start_script", L"", g_cfg.batch_start, MAX_PATH, g_ini_path);
     GetPrivateProfileStringW(L"Batch", L"stop_script",  L"", g_cfg.batch_stop,  MAX_PATH, g_ini_path);
     g_cfg.batch_timeout_ms = (int)GetPrivateProfileIntW(L"Batch", L"timeout_ms", 5000, g_ini_path);
+
+    wchar_t word[16];
+    GetPrivateProfileStringW(L"Notify", L"mode", L"batch", word, 16, g_ini_path);
+    g_cfg.notify_mode = (_wcsicmp(word, L"snmp") == 0) ? NOTIFY_SNMP : NOTIFY_BATCH;
+    GetPrivateProfileStringW(L"SnmpTrap", L"start_args", L"", g_cfg.snmp_start, SNMP_ARGS_MAX, g_ini_path);
+    GetPrivateProfileStringW(L"SnmpTrap", L"stop_args",  L"", g_cfg.snmp_stop,  SNMP_ARGS_MAX, g_ini_path);
+    GetPrivateProfileStringW(L"SnmpTrap", L"charset", L"shift_jis", word, 16, g_ini_path);
+    g_cfg.snmp_charset = (_wcsicmp(word, L"utf-8") == 0 || _wcsicmp(word, L"utf8") == 0)
+                       ? SNMP_CHARSET_UTF8 : SNMP_CHARSET_SJIS;
 
     g_cfg.autostart = (GetPrivateProfileIntW(L"General", L"autostart", 0, g_ini_path) != 0);
     return TRUE;
@@ -302,9 +412,21 @@ static void log_init(void) {
     _wfopen_s(&g_log_file, g_log_path, L"a");
 }
 
-static void logf(const char* fmt, ...) {
-    if (!g_log_file) return;
+static void log_close(void) {
     EnterCriticalSection(&g_log_cs);
+    if (g_log_file) { fclose(g_log_file); g_log_file = NULL; }
+    LeaveCriticalSection(&g_log_cs);
+}
+
+// For logging wide strings (paths, SNMP messages) as UTF-8.
+static const char* utf8(const wchar_t* s, char* buf, int cap) {
+    if (WideCharToMultiByte(CP_UTF8, 0, s, -1, buf, cap, NULL, NULL) <= 0) buf[0] = 0;
+    return buf;
+}
+
+static void logf(const char* fmt, ...) {
+    EnterCriticalSection(&g_log_cs);
+    if (!g_log_file) { LeaveCriticalSection(&g_log_cs); return; }
     SYSTEMTIME st; GetLocalTime(&st);
     fprintf(g_log_file, "[%02d:%02d:%02d] ", st.wHour, st.wMinute, st.wSecond);
     va_list ap; va_start(ap, fmt);
@@ -391,20 +513,191 @@ static void show_tray_menu(HWND hwnd) {
 }
 
 // ============================================================
-// Batch script execution
+// Start / stop notification (batch file or SNMP trap)
 // ============================================================
+//
+// The audio thread only queues events (notify_post); a single worker thread runs the batch
+// files / sends the traps in order. Running a batch takes from tens of milliseconds up to
+// the timeout, far longer than the 100 ms WASAPI capture buffer, so doing it on the audio
+// thread made the audio choppy. One worker (rather than a thread per event) keeps start and
+// stop in order, so the receiver never sees them swapped.
 
-static void run_batch(const wchar_t* path, int timeout_ms) {
+enum { NE_START = 0, NE_STOP = 1 };
+
+// Settings for the notifications. Immutable once published and shared by reference count:
+// each queued event holds a reference to the settings in effect when it was posted.
+struct NotifyConfig {
+    volatile LONG refs;
+    int      mode;                       // NOTIFY_BATCH / NOTIFY_SNMP
+    wchar_t  batch[2][MAX_PATH];         // [NE_START], [NE_STOP]
+    int      batch_timeout_ms;
+    BOOL     trap_enabled[2];
+    SnmpTrap trap[2];
+};
+
+#define NOTIFY_QUEUE_MAX 16
+
+struct NotifyItem { int ev; NotifyConfig* cfg; };
+
+static CRITICAL_SECTION   g_nq_cs;
+static CONDITION_VARIABLE g_nq_cv;
+static NotifyItem         g_nq[NOTIFY_QUEUE_MAX];
+static int                g_nq_head  = 0;
+static int                g_nq_count = 0;
+static BOOL               g_nq_quit  = FALSE;
+static NotifyConfig*      g_notify_cfg = NULL;   // current settings, guarded by g_nq_cs
+static HANDLE             g_notify_thread = NULL;
+
+static const char* notify_name(int ev) { return ev == NE_START ? "start" : "stop"; }
+
+static void notify_cfg_release(NotifyConfig* c) {
+    if (c && InterlockedDecrement(&c->refs) == 0) delete c;
+}
+
+// Builds the notification settings from g_cfg. SNMP traps are parsed and encoded here,
+// once, so that sending one later is just a send() call.
+static NotifyConfig* notify_config_from_cfg(void) {
+    NotifyConfig* c = new NotifyConfig();   // value-initialized (all zero)
+    c->refs = 1;
+    c->mode = g_cfg.notify_mode;
+    wcscpy_s(c->batch[NE_START], g_cfg.batch_start);
+    wcscpy_s(c->batch[NE_STOP],  g_cfg.batch_stop);
+    c->batch_timeout_ms = g_cfg.batch_timeout_ms;
+    if (c->mode == NOTIFY_SNMP) {
+        const wchar_t* args[2] = { g_cfg.snmp_start, g_cfg.snmp_stop };
+        for (int ev = 0; ev < 2; ev++) {
+            if (snmp_args_blank(args[ev])) continue;
+            wchar_t err[512];
+            if (snmp_trap_parse(args[ev], g_cfg.snmp_charset, FALSE, &c->trap[ev], err, 512)) {
+                c->trap_enabled[ev] = TRUE;
+            } else {
+                char u[1600];
+                logf("SNMP trap (%s) settings are invalid, not sending it: %s", notify_name(ev), utf8(err, u, sizeof(u)));
+            }
+        }
+    }
+    return c;
+}
+
+// Takes ownership of c. Events already queued keep the settings they were posted with.
+static void notify_set_config(NotifyConfig* c) {
+    EnterCriticalSection(&g_nq_cs);
+    NotifyConfig* old = g_notify_cfg;
+    g_notify_cfg = c;
+    LeaveCriticalSection(&g_nq_cs);
+    notify_cfg_release(old);
+}
+
+// Called from the audio thread. Only takes a short lock; never waits for the action.
+static void notify_post(int ev) {
+    NotifyItem dropped = { -1, NULL };
+    EnterCriticalSection(&g_nq_cs);
+    if (!g_notify_cfg) { LeaveCriticalSection(&g_nq_cs); return; }
+    if (g_nq_count == NOTIFY_QUEUE_MAX) {
+        // The worker is stuck (e.g. a batch with no timeout). Drop the oldest event so the
+        // latest state still goes out once it recovers.
+        dropped = g_nq[g_nq_head];
+        g_nq_head = (g_nq_head + 1) % NOTIFY_QUEUE_MAX;
+        g_nq_count--;
+    }
+    NotifyItem* it = &g_nq[(g_nq_head + g_nq_count) % NOTIFY_QUEUE_MAX];
+    it->ev  = ev;
+    it->cfg = g_notify_cfg;
+    InterlockedIncrement(&it->cfg->refs);
+    g_nq_count++;
+    LeaveCriticalSection(&g_nq_cs);
+    WakeConditionVariable(&g_nq_cv);
+
+    if (dropped.cfg) {
+        logf("Notify queue full: dropped a pending %s event", notify_name(dropped.ev));
+        notify_cfg_release(dropped.cfg);
+    }
+}
+
+// Runs a batch file, waiting at most timeout_ms (0 = no limit). On timeout the script and
+// everything it started (cmd.exe -> snmptrap.exe ...) are terminated via a job object, so
+// hung scripts cannot pile up.
+static void run_batch(const wchar_t* path, int timeout_ms, const char* what) {
     if (!path || path[0] == L'\0') return;
+    char u[MAX_PATH * 3];
     wchar_t cmd[MAX_PATH + 16];
     swprintf_s(cmd, MAX_PATH + 16, L"\"%s\"", path);
     STARTUPINFOW si = {}; si.cb = sizeof(si);
     si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION pi = {};
-    if (CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        WaitForSingleObject(pi.hProcess, timeout_ms > 0 ? timeout_ms : INFINITE);
-        CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+    DWORD t0 = GetTickCount();
+    if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW | CREATE_SUSPENDED,
+                        NULL, NULL, &si, &pi)) {
+        logf("Batch %s: cannot start %s (error %lu)", what, utf8(path, u, sizeof(u)), GetLastError());
+        return;
     }
+    HANDLE job = CreateJobObjectW(NULL, NULL);
+    if (job && !AssignProcessToJobObject(job, pi.hProcess)) { CloseHandle(job); job = NULL; }
+    ResumeThread(pi.hThread);
+
+    DWORD wr = WaitForSingleObject(pi.hProcess, timeout_ms > 0 ? (DWORD)timeout_ms : INFINITE);
+    if (wr == WAIT_TIMEOUT) {
+        if (job) TerminateJobObject(job, 1); else TerminateProcess(pi.hProcess, 1);
+        logf("Batch %s: still running after %d ms, terminated", what, timeout_ms);
+    } else {
+        DWORD code = 0;
+        GetExitCodeProcess(pi.hProcess, &code);
+        logf("Batch %s: exit code %lu (%lu ms)", what, code, GetTickCount() - t0);
+    }
+    if (job) CloseHandle(job);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+}
+
+static void notify_run(int ev, const NotifyConfig* c) {
+    if (c->mode == NOTIFY_SNMP) {
+        if (!c->trap_enabled[ev]) return;
+        wchar_t info[256];
+        char u[800];
+        BOOL ok = snmp_trap_send(&c->trap[ev], FALSE, info, 256);
+        logf("SNMP trap %s: %s %s", notify_name(ev), ok ? "sent," : "FAILED:", utf8(info, u, sizeof(u)));
+    } else {
+        run_batch(c->batch[ev], c->batch_timeout_ms, notify_name(ev));
+    }
+}
+
+static DWORD WINAPI notify_thread_proc(LPVOID) {
+    for (;;) {
+        EnterCriticalSection(&g_nq_cs);
+        while (g_nq_count == 0 && !g_nq_quit)
+            SleepConditionVariableCS(&g_nq_cv, &g_nq_cs, INFINITE);
+        if (g_nq_count == 0) {          // quit requested and nothing left to send
+            LeaveCriticalSection(&g_nq_cs);
+            break;
+        }
+        NotifyItem it = g_nq[g_nq_head];
+        g_nq_head = (g_nq_head + 1) % NOTIFY_QUEUE_MAX;
+        g_nq_count--;
+        LeaveCriticalSection(&g_nq_cs);
+
+        notify_run(it.ev, it.cfg);
+        notify_cfg_release(it.cfg);
+    }
+    return 0;
+}
+
+static void notify_init(void) {
+    InitializeCriticalSection(&g_nq_cs);
+    InitializeConditionVariable(&g_nq_cv);
+    g_notify_thread = CreateThread(NULL, 0, notify_thread_proc, NULL, 0, NULL);
+}
+
+// Lets the worker finish the queued events (e.g. the final stop) and waits up to wait_ms.
+static void notify_shutdown(DWORD wait_ms) {
+    if (!g_notify_thread) return;
+    EnterCriticalSection(&g_nq_cs);
+    g_nq_quit = TRUE;
+    LeaveCriticalSection(&g_nq_cs);
+    WakeConditionVariable(&g_nq_cv);
+    if (WaitForSingleObject(g_notify_thread, wait_ms) == WAIT_TIMEOUT)
+        logf("Notify worker still busy after %lu ms, exiting anyway", wait_ms);
+    CloseHandle(g_notify_thread);
+    g_notify_thread = NULL;
 }
 
 // ============================================================
@@ -479,9 +772,6 @@ struct ThreadConfig {
     int     bitrate_kbps;
     int     silence_guard_ms;
     int     audio_guard_ms;
-    wchar_t batch_start[MAX_PATH];
-    wchar_t batch_stop[MAX_PATH];
-    int     batch_timeout_ms;
     BOOL    use_process_loopback;
 };
 
@@ -632,11 +922,12 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
     DWORD last_send_tick = GetTickCount();
 
     // DTX guard state (ms-based; frames are 20ms each)
-    int silence_frames = tc->silence_guard_ms / 20;  // silent frames needed to trigger batch_stop
-    int audio_frames   = tc->audio_guard_ms   / 20;  // active frames needed to trigger batch_start
+    int silence_frames = tc->silence_guard_ms / 20;  // silent frames needed to trigger the stop notification
+    int audio_frames   = tc->audio_guard_ms   / 20;  // active frames needed to trigger the start notification
     int silent_count = 0, active_count = 0;
-    BOOL sending = TRUE;  // start in active mode, batch_start fires immediately
-    run_batch(tc->batch_start, tc->batch_timeout_ms);
+    BOOL sending = TRUE;  // start in active mode, the start notification fires immediately
+    // Notifications are only queued here; the notify worker runs them (see notify_post).
+    notify_post(NE_START);
 
     BYTE opus_buf[4000];
     BYTE pkt_buf[12 + 4000];
@@ -686,16 +977,16 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
                         sending = FALSE;
                         was_silent = 1;  // next talkspurt needs Marker bit
                         PostMessage(g_hwnd, WM_AUDIO_STATE, AS_SILENT, 0);
-                        run_batch(tc->batch_stop, tc->batch_timeout_ms);
-                        logf("Silence detected -> batch_stop");
+                        notify_post(NE_STOP);
+                        logf("Silence detected -> notify stop");
                     }
                 } else {
                     active_count++; silent_count = 0;
                     if (!sending && active_count >= audio_frames) {
                         sending = TRUE;
                         PostMessage(g_hwnd, WM_AUDIO_STATE, AS_ACTIVE, 0);
-                        run_batch(tc->batch_start, tc->batch_timeout_ms);
-                        logf("Audio resumed -> batch_start");
+                        notify_post(NE_START);
+                        logf("Audio resumed -> notify start");
                     }
                 }
 
@@ -732,7 +1023,7 @@ static DWORD WINAPI audio_thread_proc(LPVOID param) {
     }
 
     logf("Audio thread stopping");
-    run_batch(tc->batch_stop, tc->batch_timeout_ms);
+    if (sending) notify_post(NE_STOP);   // only if a start was notified and not yet stopped
     ac->Stop();
     opus_encoder_destroy(enc);
     cap->Release(); ac->Release();
@@ -754,9 +1045,6 @@ static void start_audio_thread(void) {
     tc->bitrate_kbps     = g_cfg.bitrate_kbps;
     tc->silence_guard_ms = g_cfg.silence_guard_ms;
     tc->audio_guard_ms   = g_cfg.audio_guard_ms;
-    wcscpy_s(tc->batch_start, g_cfg.batch_start);
-    wcscpy_s(tc->batch_stop,  g_cfg.batch_stop);
-    tc->batch_timeout_ms     = g_cfg.batch_timeout_ms;
     tc->use_process_loopback = (g_cfg.loopback_mode == 0 && g_process_loopback_supported);
 
     if (g_audio_thread) { CloseHandle(g_audio_thread); g_audio_thread = NULL; }
@@ -780,6 +1068,17 @@ static int     s_tmp_port, s_tmp_bitrate, s_tmp_silence, s_tmp_audio, s_tmp_time
 static int     s_tmp_loopback_mode;
 static wchar_t s_tmp_batch_start[MAX_PATH], s_tmp_batch_stop[MAX_PATH];
 static BOOL    s_tmp_autostart;
+static int     s_tmp_notify_mode;
+static wchar_t s_tmp_snmp_start[SNMP_ARGS_MAX], s_tmp_snmp_stop[SNMP_ARGS_MAX];
+static UINT    s_tmp_snmp_charset;
+
+// Restarts capture with the current g_cfg. The notification settings are swapped while
+// no audio thread runs, so the final stop of the old thread still uses the old settings.
+static void restart_audio(void) {
+    stop_audio_thread();
+    notify_set_config(notify_config_from_cfg());
+    start_audio_thread();
+}
 
 static void apply_settings(void) {
     wcscpy_s(g_cfg.server_ip,    s_tmp_ip);
@@ -792,11 +1091,14 @@ static void apply_settings(void) {
     g_cfg.batch_timeout_ms    = s_tmp_timeout;
     g_cfg.autostart           = s_tmp_autostart;
     g_cfg.loopback_mode       = s_tmp_loopback_mode;
+    g_cfg.notify_mode         = s_tmp_notify_mode;
+    wcscpy_s(g_cfg.snmp_start, s_tmp_snmp_start);
+    wcscpy_s(g_cfg.snmp_stop,  s_tmp_snmp_stop);
+    g_cfg.snmp_charset        = s_tmp_snmp_charset;
 
     set_autostart(g_cfg.autostart);
     save_config();
-    stop_audio_thread();
-    start_audio_thread();
+    restart_audio();
 }
 
 static void browse_batch(HWND hdlg, int edit_id) {
@@ -895,26 +1197,140 @@ static INT_PTR CALLBACK page_detection(HWND hdlg, UINT msg, WPARAM wp, LPARAM lp
     return FALSE;
 }
 
-// ---- Batch page ----
-static INT_PTR CALLBACK page_batch(HWND hdlg, UINT msg, WPARAM wp, LPARAM lp) {
+// ---- Notify page (batch file / SNMP trap) ----
+static const int NOTIFY_BATCH_CTRLS[] = {
+    IDC_BATCH_START_GROUP, IDC_BATCH_START, IDC_BATCH_START_BROWSE,
+    IDC_BATCH_STOP_GROUP,  IDC_BATCH_STOP,  IDC_BATCH_STOP_BROWSE,
+    IDC_BATCH_TIMEOUT_LABEL, IDC_BATCH_TIMEOUT, IDC_BATCH_TIMEOUT_SPIN, IDC_BATCH_NOTE,
+};
+static const int NOTIFY_SNMP_CTRLS[] = {
+    IDC_SNMP_START_LABEL, IDC_SNMP_START, IDC_SNMP_TEST_START,
+    IDC_SNMP_STOP_LABEL,  IDC_SNMP_STOP,  IDC_SNMP_TEST_STOP,
+    IDC_SNMP_CHARSET_LABEL, IDC_SNMP_CHARSET, IDC_SNMP_HINT,
+};
+
+static void notify_page_show(HWND hdlg, int mode) {
+    for (int id : NOTIFY_BATCH_CTRLS)
+        ShowWindow(GetDlgItem(hdlg, id), mode == NOTIFY_BATCH ? SW_SHOW : SW_HIDE);
+    for (int id : NOTIFY_SNMP_CTRLS)
+        ShowWindow(GetDlgItem(hdlg, id), mode == NOTIFY_SNMP ? SW_SHOW : SW_HIDE);
+}
+
+static UINT notify_page_charset(HWND hdlg) {
+    return SendDlgItemMessageW(hdlg, IDC_SNMP_CHARSET, CB_GETCURSEL, 0, 0) == 1
+         ? SNMP_CHARSET_UTF8 : SNMP_CHARSET_SJIS;
+}
+
+// Parses the trap in an edit box. Shows the problem and returns FALSE if it is invalid.
+static BOOL notify_page_parse(HWND hdlg, int edit_id, const wchar_t* args, const wchar_t* which,
+                              SnmpTrap* t) {
+    wchar_t err[512];
+    if (snmp_trap_parse(args, notify_page_charset(hdlg), ui_ja(), t, err, 512)) return TRUE;
+    wchar_t msg[1024];
+    _snwprintf_s(msg, _countof(msg), _TRUNCATE, S->snmp_invalid_fmt, which, err);
+    MessageBoxW(hdlg, msg, S->sheet_caption, MB_OK | MB_ICONWARNING);
+    SetFocus(GetDlgItem(hdlg, edit_id));
+    return FALSE;
+}
+
+// "Send test": sends the trap as currently typed (not yet saved).
+static void notify_page_test(HWND hdlg, int edit_id, const wchar_t* which) {
+    wchar_t args[SNMP_ARGS_MAX];
+    GetDlgItemTextW(hdlg, edit_id, args, SNMP_ARGS_MAX);
+    if (snmp_args_blank(args)) {
+        MessageBoxW(hdlg, S->snmp_test_empty, S->sheet_caption, MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    SnmpTrap t;
+    if (!notify_page_parse(hdlg, edit_id, args, which, &t)) return;
+
+    wchar_t info[256], msg[1024];
+    char u[800];
+    BOOL ok = snmp_trap_send(&t, ui_ja(), info, 256);
+    logf("SNMP test trap (%s): %s", edit_id == IDC_SNMP_START ? "start" : "stop", utf8(info, u, sizeof(u)));
+    _snwprintf_s(msg, _countof(msg), _TRUNCATE, ok ? S->snmp_test_ok_fmt : S->snmp_test_fail_fmt, info);
+    MessageBoxW(hdlg, msg, S->sheet_caption, MB_OK | (ok ? MB_ICONINFORMATION : MB_ICONWARNING));
+}
+
+static INT_PTR CALLBACK page_notify(HWND hdlg, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_INITDIALOG: {
+        SetDlgItemTextW(hdlg, IDC_NOTIFY_LABEL,        S->notify_label);
+        SetDlgItemTextW(hdlg, IDC_NOTIFY_BATCH,        S->notify_batch);
+        SetDlgItemTextW(hdlg, IDC_NOTIFY_SNMP,         S->notify_snmp);
+        SetDlgItemTextW(hdlg, IDC_BATCH_START_GROUP,   S->on_start);
+        SetDlgItemTextW(hdlg, IDC_BATCH_STOP_GROUP,    S->on_stop);
+        SetDlgItemTextW(hdlg, IDC_BATCH_TIMEOUT_LABEL, S->batch_timeout);
+        SetDlgItemTextW(hdlg, IDC_BATCH_NOTE,          S->batch_note);
+        SetDlgItemTextW(hdlg, IDC_SNMP_START_LABEL,    S->snmp_start_label);
+        SetDlgItemTextW(hdlg, IDC_SNMP_STOP_LABEL,     S->snmp_stop_label);
+        SetDlgItemTextW(hdlg, IDC_SNMP_TEST_START,     S->snmp_test);
+        SetDlgItemTextW(hdlg, IDC_SNMP_TEST_STOP,      S->snmp_test);
+        SetDlgItemTextW(hdlg, IDC_SNMP_CHARSET_LABEL,  S->snmp_charset);
+        SetDlgItemTextW(hdlg, IDC_SNMP_HINT,           S->snmp_hint);
+
+        CheckRadioButton(hdlg, IDC_NOTIFY_BATCH, IDC_NOTIFY_SNMP,
+                         s_tmp_notify_mode == NOTIFY_SNMP ? IDC_NOTIFY_SNMP : IDC_NOTIFY_BATCH);
+
         SetDlgItemTextW(hdlg, IDC_BATCH_START, s_tmp_batch_start);
         SetDlgItemTextW(hdlg, IDC_BATCH_STOP,  s_tmp_batch_stop);
         SetDlgItemInt(hdlg, IDC_BATCH_TIMEOUT, s_tmp_timeout, FALSE);
         SendMessage(GetDlgItem(hdlg, IDC_BATCH_TIMEOUT_SPIN), UDM_SETRANGE, 0, MAKELPARAM(60000, 0));
+
+        // Shown with one variable binding per line; stored as one line in the INI file.
+        wchar_t disp[SNMP_ARGS_MAX];
+        snmp_args_canonical(s_tmp_snmp_start, TRUE, disp, SNMP_ARGS_MAX);
+        SetDlgItemTextW(hdlg, IDC_SNMP_START, disp);
+        snmp_args_canonical(s_tmp_snmp_stop, TRUE, disp, SNMP_ARGS_MAX);
+        SetDlgItemTextW(hdlg, IDC_SNMP_STOP, disp);
+        SendDlgItemMessageW(hdlg, IDC_SNMP_START, EM_LIMITTEXT, SNMP_ARGS_MAX - 1, 0);
+        SendDlgItemMessageW(hdlg, IDC_SNMP_STOP,  EM_LIMITTEXT, SNMP_ARGS_MAX - 1, 0);
+
+        SendDlgItemMessageW(hdlg, IDC_SNMP_CHARSET, CB_ADDSTRING, 0, (LPARAM)L"Shift_JIS (CP932)");
+        SendDlgItemMessageW(hdlg, IDC_SNMP_CHARSET, CB_ADDSTRING, 0, (LPARAM)L"UTF-8");
+        SendDlgItemMessageW(hdlg, IDC_SNMP_CHARSET, CB_SETCURSEL,
+                            s_tmp_snmp_charset == SNMP_CHARSET_UTF8 ? 1 : 0, 0);
+
+        notify_page_show(hdlg, s_tmp_notify_mode);
         return TRUE;
     }
     case WM_COMMAND:
-        if (LOWORD(wp) == IDC_BATCH_START_BROWSE) browse_batch(hdlg, IDC_BATCH_START);
-        if (LOWORD(wp) == IDC_BATCH_STOP_BROWSE)  browse_batch(hdlg, IDC_BATCH_STOP);
+        switch (LOWORD(wp)) {
+        case IDC_BATCH_START_BROWSE: browse_batch(hdlg, IDC_BATCH_START); break;
+        case IDC_BATCH_STOP_BROWSE:  browse_batch(hdlg, IDC_BATCH_STOP);  break;
+        case IDC_NOTIFY_BATCH:
+        case IDC_NOTIFY_SNMP:
+            if (HIWORD(wp) == BN_CLICKED)
+                notify_page_show(hdlg, LOWORD(wp) == IDC_NOTIFY_SNMP ? NOTIFY_SNMP : NOTIFY_BATCH);
+            break;
+        case IDC_SNMP_TEST_START: notify_page_test(hdlg, IDC_SNMP_START, S->on_start); break;
+        case IDC_SNMP_TEST_STOP:  notify_page_test(hdlg, IDC_SNMP_STOP,  S->on_stop);  break;
+        }
         break;
     case WM_NOTIFY: {
         NMHDR* hdr = (NMHDR*)lp;
         if (hdr->code == PSN_APPLY) {
+            int mode = (IsDlgButtonChecked(hdlg, IDC_NOTIFY_SNMP) == BST_CHECKED) ? NOTIFY_SNMP : NOTIFY_BATCH;
+            wchar_t start[SNMP_ARGS_MAX], stop[SNMP_ARGS_MAX];
+            GetDlgItemTextW(hdlg, IDC_SNMP_START, start, SNMP_ARGS_MAX);
+            GetDlgItemTextW(hdlg, IDC_SNMP_STOP,  stop,  SNMP_ARGS_MAX);
+
+            // In SNMP mode, refuse to close the dialog with a trap that cannot be sent.
+            if (mode == NOTIFY_SNMP) {
+                SnmpTrap t;
+                if ((!snmp_args_blank(start) && !notify_page_parse(hdlg, IDC_SNMP_START, start, S->on_start, &t)) ||
+                    (!snmp_args_blank(stop)  && !notify_page_parse(hdlg, IDC_SNMP_STOP,  stop,  S->on_stop,  &t))) {
+                    SetWindowLongPtrW(hdlg, DWLP_MSGRESULT, PSNRET_INVALID);
+                    return TRUE;
+                }
+            }
+            s_tmp_notify_mode = mode;
             GetDlgItemTextW(hdlg, IDC_BATCH_START, s_tmp_batch_start, MAX_PATH);
             GetDlgItemTextW(hdlg, IDC_BATCH_STOP,  s_tmp_batch_stop,  MAX_PATH);
             s_tmp_timeout = (int)GetDlgItemInt(hdlg, IDC_BATCH_TIMEOUT, NULL, FALSE);
+            snmp_args_canonical(start, FALSE, s_tmp_snmp_start, SNMP_ARGS_MAX);
+            snmp_args_canonical(stop,  FALSE, s_tmp_snmp_stop,  SNMP_ARGS_MAX);
+            s_tmp_snmp_charset = notify_page_charset(hdlg);
         }
         break;
     }
@@ -950,12 +1366,16 @@ static BOOL show_settings(HWND hwnd) {
     s_tmp_timeout  = g_cfg.batch_timeout_ms;
     s_tmp_autostart = g_cfg.autostart;
     s_tmp_loopback_mode = (g_cfg.loopback_mode == 0 && g_process_loopback_supported) ? 0 : 1;
+    s_tmp_notify_mode  = g_cfg.notify_mode;
+    wcscpy_s(s_tmp_snmp_start, g_cfg.snmp_start);
+    wcscpy_s(s_tmp_snmp_stop,  g_cfg.snmp_stop);
+    s_tmp_snmp_charset = g_cfg.snmp_charset;
 
     PROPSHEETPAGEW pages[5] = {};
-    const wchar_t* titles[] = { S->tab_connection, S->tab_audio, S->tab_detection, S->tab_batch, S->tab_general };
-    DLGPROC procs[]  = { page_connection, page_audio, page_detection, page_batch, page_general };
+    const wchar_t* titles[] = { S->tab_connection, S->tab_audio, S->tab_detection, S->tab_notify, S->tab_general };
+    DLGPROC procs[]  = { page_connection, page_audio, page_detection, page_notify, page_general };
     int     ids[]    = { IDD_PAGE_CONNECTION, IDD_PAGE_AUDIO, IDD_PAGE_DETECTION,
-                         IDD_PAGE_BATCH, IDD_PAGE_GENERAL };
+                         IDD_PAGE_NOTIFY, IDD_PAGE_GENERAL };
 
     for (int i = 0; i < 5; i++) {
         pages[i].dwSize      = sizeof(PROPSHEETPAGEW);
@@ -1005,11 +1425,10 @@ static LRESULT CALLBACK main_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
             break;
         case IDM_RELOAD:
             load_config();  // reload from INI (ignores first-run return value here)
-            stop_audio_thread();
-            start_audio_thread();
+            restart_audio();
             break;
         case IDM_EXIT:
-            PostQuitMessage(0);
+            DestroyWindow(hwnd);   // WM_DESTROY stops capture and sends the final notification
             break;
         }
         return 0;
@@ -1017,6 +1436,7 @@ static LRESULT CALLBACK main_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
     case WM_DESTROY:
         tray_remove();
         stop_audio_thread();
+        notify_shutdown(8000);     // let a pending stop notification go out
         PostQuitMessage(0);
         return 0;
     }
@@ -1062,6 +1482,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
 
     WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
 
+    notify_init();
+    notify_set_config(notify_config_from_cfg());
+
     // Common controls
     INITCOMMONCONTROLSEX icc = {};
     icc.dwSize = sizeof(icc);
@@ -1105,7 +1528,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
 
     WSACleanup();
     logf("raa-client exiting");
-    if (g_log_file) fclose(g_log_file);
+    log_close();
     CloseHandle(mutex);
     return 0;
 }

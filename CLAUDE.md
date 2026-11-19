@@ -1,7 +1,7 @@
 # Remote Audio Aggregation — ソリューション仕様概要
 
 作成日: 2026-05-14  
-最終更新: 2026-05-22
+最終更新: 2026-11-18
 
 ---
 
@@ -153,6 +153,21 @@ journalctl --user -u raa-server -f
 - Opus エンコーダも `opus_encoder_create(48000, 1, ...)` に合わせること（チャンネル数の不整合はクラッシュする）。
 - サーバー側 `mixer.js` の `CHANNELS` も同じ値にすること。クライアントとサーバーで不一致があると無音になる。
 
+### Win32クライアントの音声開始/停止通知（バッチ / SNMP Trap）の重要事項
+
+音声の開始・停止時に、バッチファイルを実行するか SNMP Trap を直接送る（設定ダイアログの「通知」タブで切り替え）。
+
+- **音声スレッドでは実行しない。** 以前は音声スレッドでバッチを起動して終了を待っていたため、WASAPI のキャプチャバッファ（100ms）があふれて音が途切れていた。現在は音声スレッドがイベントをキュー（16 件）に積むだけで、専用のワーカースレッド 1 本が順番に実行する。イベントごとにスレッドを立てないのは、開始と停止の順序が入れ替わると受信側で鳴動中/停止が逆転するため。
+- **キューの各イベントは、積んだ時点の設定を参照カウント付きで持つ**（`NotifyConfig`）。設定変更時は音声スレッドを止めてから設定を差し替えるので、旧スレッド最後の停止通知は旧設定で送られる。
+- **バッチはジョブオブジェクトに入れて起動する。** タイムアウトしたら cmd.exe とそこから起動した snmptrap.exe などをまとめて終了させ、止まったバッチがたまっていかないようにしている（0 = 無制限）。
+- **SNMP Trap は `client/src/snmp-trap.cpp` で自前エンコード（SNMPv1 / v2c、UDP/IPv4）。** 指定方法は net-snmp の `snmptrap` の引数と同じ書式で、バッチファイルの中身を貼り付けてもよい（snmptrap.exe より前の行・rem 行・行末の `^` は無視）。設定読込時に一度だけ解析・BER エンコードし、送信時は uptime と agent アドレスを埋めて `send()` するだけ（子プロセスなし、送信ごとのヒープ確保なし）。
+  - 対応する変数の型: `i u c C t a o s x d n`。OID は数値表記のみ（MIB 名は使えない）。オプションは `-v` と `-c` のみ。
+  - v1 の agent-addr `""` は、送信先へ向かうときのローカル IP（UDP ソケットを connect して getsockname で取得）。uptime `""` は Windows の起動からの経過時間（1/100 秒）。
+  - `s` 値とコミュニティの文字コードは既定で Shift_JIS。snmptrap.exe はコマンドラインを ANSI コードページで受け取るため、日本語 Windows では Shift_JIS で送っていた。それと同じにしている。
+  - 設定ダイアログで OK を押したときに解析し、誤りがあれば閉じずにメッセージを出す。「テスト送信」で入力中の内容をその場で送れる。
+- 起動時は「送信中」状態から始めるため、起動直後に開始通知 → 無音検知で停止通知が出る（従来どおり）。終了時の停止通知は、開始を通知したまま停止していない場合だけ送る。
+- トレイメニューの「終了」は `DestroyWindow` → `WM_DESTROY` で音声スレッドと通知ワーカーを止め、未送信の停止通知を最大 8 秒待ってから終了する。
+
 ### Win32プレイヤー（raa-player）の重要事項
 
 ソースは `player/src/raa-player.cpp`。libopus は `client/deps` を共用（`player/build.bat` が無ければ `client/get_opus.bat` を呼ぶ）。
@@ -292,7 +307,7 @@ a=fmtp:111 stereo=0
 
 ### 設定ファイル
 - `%APPDATA%\raa-client\raa-client.ini`（Windows INI API: `WritePrivateProfileString` / `GetPrivateProfileInt`）
-- セクション: `[Connection]` server_ip / server_port / ssrc、`[Audio]` bitrate_kbps / loopback_mode（0=Process/1=Classic）、`[Detection]` silence_guard_ms / audio_guard_ms、`[Batch]` start_script / stop_script / timeout_ms、`[General]` autostart
+- セクション: `[Connection]` server_ip / server_port / ssrc、`[Audio]` bitrate_kbps / loopback_mode（0=Process/1=Classic）、`[Detection]` silence_guard_ms / audio_guard_ms、`[Notify]` mode（batch / snmp）、`[Batch]` start_script / stop_script / timeout_ms、`[SnmpTrap]` start_args / stop_args / charset（shift_jis / utf-8）、`[General]` autostart
 - **初回起動フロー**: INI 未存在 → SSRC 生成 → 設定ダイアログ自動表示 → OK で INI 初回保存 → 音声スレッド開始。Cancel → アプリ終了。
 - SSRC は INI に保存。アンインストールしない限り変わらない。
 
@@ -604,7 +619,7 @@ ws.onmessage = (e) => this._onFrame(e);  // _onFrame()はcbm-player.jsから流�
 - libopus encode（64kbps、DTX）+ RTP/UDP 送信（RFC 3550 + RFC 7587）
 - システムトレイ（.ico 3状態）・5タブ設定ダイアログ・INI永続化・初回起動フロー
 - オーディオタブ: キャプチャ API 選択ラジオボタン（ビルド非対応時は Process Loopback をグレーアウト）
-- バッチスクリプト実行（音声開始/終了時）・自動起動設定（レジストリ）
+- 音声開始/終了時の通知（バッチ実行 または SNMP Trap 直接送信、専用スレッドで実行）・自動起動設定（レジストリ）
 - シングルインスタンス制御（Mutex）・ログファイル
 
 **配布:**
